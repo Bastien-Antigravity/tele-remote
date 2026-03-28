@@ -14,6 +14,8 @@ import (
 	"github.com/Bastien-Antigravity/flexible-logger/src/profiles"
 )
 
+// -----------------------------------------------------------------------------
+// main is the entry point orchestrating configurations, gRPC, and Telegram bots
 func main() {
 	// 1. Initialize Settings
 	cfg, err := config.LoadConfig()
@@ -37,13 +39,28 @@ func main() {
 	// 3. Setup Telegram Bot early to use it as a callback telemetry for gRPC
 	// (Deferred instantiation using a channel/func proxy to prevent circular dep)
 	var telemetryCallback func(string)
-	grpcSrv := grpc_control.NewServer(appLogger, cfg.BindIP, cfg.BindPort, func(msg string) {
-		if telemetryCallback != nil {
-			telemetryCallback(msg)
-		}
+	var botInstance *telegram.Bot
+	
+	grpcSrv := grpc_control.NewServer(appLogger, cfg.BindIP, cfg.BindPort, grpc_control.ServerCallbacks{
+		OnTelemetry: func(msg string) {
+			if telemetryCallback != nil {
+				telemetryCallback(msg)
+			}
+		},
+		OnRegistration: func(clientID, componentName, menuJSON string) {
+			if botInstance != nil {
+				botInstance.OnComponentConnected(clientID, componentName, menuJSON)
+			}
+		},
+		OnDisconnect: func(clientID string) {
+			if botInstance != nil {
+				botInstance.OnComponentDisconnected(clientID)
+			}
+		},
 	})
 
 	bot, err := telegram.NewBot(cfg, appLogger, grpcSrv)
+	botInstance = bot
 	if err != nil {
 		appLogger.Error("Failed to init telegram bot", "err", err)
 		os.Exit(1)

@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package teleremote;
 
-option go_package = "github.com/Bastien-Antigravity/TeleRemote/pb";
+option go_package = "tele-remote/src/grpc_control";
 
 service TeleRemoteService {
     // Bi-directional stream for connecting a component to the bot gateway
@@ -26,7 +26,8 @@ message ComponentMessage {
 }
 
 message Registration {
-    // Any specific config or tags the component wants to declare
+    // A JSON string representing a tree of menus and commands
+    string menu_json = 1; 
 }
 
 message QueueMessage {

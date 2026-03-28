@@ -2,17 +2,16 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v6.33.1
-// source: pb/teleremote.proto
+// source: teleremote.proto
 
 package grpc_control
 
 import (
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
-
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -59,11 +58,11 @@ func (x BotCommand_CommandType) String() string {
 }
 
 func (BotCommand_CommandType) Descriptor() protoreflect.EnumDescriptor {
-	return file_pb_teleremote_proto_enumTypes[0].Descriptor()
+	return file_teleremote_proto_enumTypes[0].Descriptor()
 }
 
 func (BotCommand_CommandType) Type() protoreflect.EnumType {
-	return &file_pb_teleremote_proto_enumTypes[0]
+	return &file_teleremote_proto_enumTypes[0]
 }
 
 func (x BotCommand_CommandType) Number() protoreflect.EnumNumber {
@@ -72,7 +71,7 @@ func (x BotCommand_CommandType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use BotCommand_CommandType.Descriptor instead.
 func (BotCommand_CommandType) EnumDescriptor() ([]byte, []int) {
-	return file_pb_teleremote_proto_rawDescGZIP(), []int{3, 0}
+	return file_teleremote_proto_rawDescGZIP(), []int{3, 0}
 }
 
 // A message sent from the external component/service to the Bot
@@ -93,7 +92,7 @@ type ComponentMessage struct {
 
 func (x *ComponentMessage) Reset() {
 	*x = ComponentMessage{}
-	mi := &file_pb_teleremote_proto_msgTypes[0]
+	mi := &file_teleremote_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -105,7 +104,7 @@ func (x *ComponentMessage) String() string {
 func (*ComponentMessage) ProtoMessage() {}
 
 func (x *ComponentMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_pb_teleremote_proto_msgTypes[0]
+	mi := &file_teleremote_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -118,7 +117,7 @@ func (x *ComponentMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ComponentMessage.ProtoReflect.Descriptor instead.
 func (*ComponentMessage) Descriptor() ([]byte, []int) {
-	return file_pb_teleremote_proto_rawDescGZIP(), []int{0}
+	return file_teleremote_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *ComponentMessage) GetComponentName() string {
@@ -202,14 +201,16 @@ func (*ComponentMessage_Telemetry) isComponentMessage_Payload() {}
 func (*ComponentMessage_Qmsg) isComponentMessage_Payload() {}
 
 type Registration struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// A JSON string representing a tree of menus and commands
+	MenuJson      string `protobuf:"bytes,1,opt,name=menu_json,json=menuJson,proto3" json:"menu_json,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Registration) Reset() {
 	*x = Registration{}
-	mi := &file_pb_teleremote_proto_msgTypes[1]
+	mi := &file_teleremote_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -221,7 +222,7 @@ func (x *Registration) String() string {
 func (*Registration) ProtoMessage() {}
 
 func (x *Registration) ProtoReflect() protoreflect.Message {
-	mi := &file_pb_teleremote_proto_msgTypes[1]
+	mi := &file_teleremote_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -234,7 +235,14 @@ func (x *Registration) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Registration.ProtoReflect.Descriptor instead.
 func (*Registration) Descriptor() ([]byte, []int) {
-	return file_pb_teleremote_proto_rawDescGZIP(), []int{1}
+	return file_teleremote_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *Registration) GetMenuJson() string {
+	if x != nil {
+		return x.MenuJson
+	}
+	return ""
 }
 
 type QueueMessage struct {
@@ -251,7 +259,7 @@ type QueueMessage struct {
 
 func (x *QueueMessage) Reset() {
 	*x = QueueMessage{}
-	mi := &file_pb_teleremote_proto_msgTypes[2]
+	mi := &file_teleremote_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -263,7 +271,7 @@ func (x *QueueMessage) String() string {
 func (*QueueMessage) ProtoMessage() {}
 
 func (x *QueueMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_pb_teleremote_proto_msgTypes[2]
+	mi := &file_teleremote_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -276,7 +284,7 @@ func (x *QueueMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueMessage.ProtoReflect.Descriptor instead.
 func (*QueueMessage) Descriptor() ([]byte, []int) {
-	return file_pb_teleremote_proto_rawDescGZIP(), []int{2}
+	return file_teleremote_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *QueueMessage) GetId() string {
@@ -332,7 +340,7 @@ type BotCommand struct {
 
 func (x *BotCommand) Reset() {
 	*x = BotCommand{}
-	mi := &file_pb_teleremote_proto_msgTypes[3]
+	mi := &file_teleremote_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -344,7 +352,7 @@ func (x *BotCommand) String() string {
 func (*BotCommand) ProtoMessage() {}
 
 func (x *BotCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_pb_teleremote_proto_msgTypes[3]
+	mi := &file_teleremote_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -357,7 +365,7 @@ func (x *BotCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BotCommand.ProtoReflect.Descriptor instead.
 func (*BotCommand) Descriptor() ([]byte, []int) {
-	return file_pb_teleremote_proto_rawDescGZIP(), []int{3}
+	return file_teleremote_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *BotCommand) GetCommandType() BotCommand_CommandType {
@@ -374,11 +382,11 @@ func (x *BotCommand) GetCustomPayload() string {
 	return ""
 }
 
-var File_pb_teleremote_proto protoreflect.FileDescriptor
+var File_teleremote_proto protoreflect.FileDescriptor
 
-const file_pb_teleremote_proto_rawDesc = "" +
+const file_teleremote_proto_rawDesc = "" +
 	"\n" +
-	"\x13pb/teleremote.proto\x12\n" +
+	"\x10teleremote.proto\x12\n" +
 	"teleremote\"\xfc\x01\n" +
 	"\x10ComponentMessage\x12%\n" +
 	"\x0ecomponent_name\x18\x01 \x01(\tR\rcomponentName\x12\x12\n" +
@@ -387,8 +395,9 @@ const file_pb_teleremote_proto_rawDesc = "" +
 	"\fregistration\x18\x04 \x01(\v2\x18.teleremote.RegistrationH\x00R\fregistration\x12\x1e\n" +
 	"\ttelemetry\x18\x05 \x01(\tH\x00R\ttelemetry\x12.\n" +
 	"\x04qmsg\x18\x06 \x01(\v2\x18.teleremote.QueueMessageH\x00R\x04qmsgB\t\n" +
-	"\apayload\"\x0e\n" +
-	"\fRegistration\"\xa4\x01\n" +
+	"\apayload\"+\n" +
+	"\fRegistration\x12\x1b\n" +
+	"\tmenu_json\x18\x01 \x01(\tR\bmenuJson\"\xa4\x01\n" +
 	"\fQueueMessage\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x10\n" +
 	"\x03msg\x18\x02 \x01(\tR\x03msg\x12\x1b\n" +
@@ -407,32 +416,30 @@ const file_pb_teleremote_proto_rawDesc = "" +
 	"\x13CLOSE_ALL_POSITIONS\x10\x02\x12\x12\n" +
 	"\x0eCUSTOM_COMMAND\x10c2X\n" +
 	"\x11TeleRemoteService\x12C\n" +
-	"\aConnect\x12\x1c.teleremote.ComponentMessage\x1a\x16.teleremote.BotCommand(\x010\x01B.Z,github.com/Bastien-Antigravity/TeleRemote/pbb\x06proto3"
+	"\aConnect\x12\x1c.teleremote.ComponentMessage\x1a\x16.teleremote.BotCommand(\x010\x01B\x1eZ\x1ctele-remote/src/grpc_controlb\x06proto3"
 
 var (
-	file_pb_teleremote_proto_rawDescOnce sync.Once
-	file_pb_teleremote_proto_rawDescData []byte
+	file_teleremote_proto_rawDescOnce sync.Once
+	file_teleremote_proto_rawDescData []byte
 )
 
-func file_pb_teleremote_proto_rawDescGZIP() []byte {
-	file_pb_teleremote_proto_rawDescOnce.Do(func() {
-		file_pb_teleremote_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_pb_teleremote_proto_rawDesc), len(file_pb_teleremote_proto_rawDesc)))
+func file_teleremote_proto_rawDescGZIP() []byte {
+	file_teleremote_proto_rawDescOnce.Do(func() {
+		file_teleremote_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_teleremote_proto_rawDesc), len(file_teleremote_proto_rawDesc)))
 	})
-	return file_pb_teleremote_proto_rawDescData
+	return file_teleremote_proto_rawDescData
 }
 
-var (
-	file_pb_teleremote_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-	file_pb_teleremote_proto_msgTypes  = make([]protoimpl.MessageInfo, 4)
-	file_pb_teleremote_proto_goTypes   = []any{
-		(BotCommand_CommandType)(0), // 0: teleremote.BotCommand.CommandType
-		(*ComponentMessage)(nil),    // 1: teleremote.ComponentMessage
-		(*Registration)(nil),        // 2: teleremote.Registration
-		(*QueueMessage)(nil),        // 3: teleremote.QueueMessage
-		(*BotCommand)(nil),          // 4: teleremote.BotCommand
-	}
-)
-var file_pb_teleremote_proto_depIdxs = []int32{
+var file_teleremote_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_teleremote_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_teleremote_proto_goTypes = []any{
+	(BotCommand_CommandType)(0), // 0: teleremote.BotCommand.CommandType
+	(*ComponentMessage)(nil),    // 1: teleremote.ComponentMessage
+	(*Registration)(nil),        // 2: teleremote.Registration
+	(*QueueMessage)(nil),        // 3: teleremote.QueueMessage
+	(*BotCommand)(nil),          // 4: teleremote.BotCommand
+}
+var file_teleremote_proto_depIdxs = []int32{
 	2, // 0: teleremote.ComponentMessage.registration:type_name -> teleremote.Registration
 	3, // 1: teleremote.ComponentMessage.qmsg:type_name -> teleremote.QueueMessage
 	0, // 2: teleremote.BotCommand.command_type:type_name -> teleremote.BotCommand.CommandType
@@ -445,33 +452,33 @@ var file_pb_teleremote_proto_depIdxs = []int32{
 	0, // [0:3] is the sub-list for field type_name
 }
 
-func init() { file_pb_teleremote_proto_init() }
-func file_pb_teleremote_proto_init() {
-	if File_pb_teleremote_proto != nil {
+func init() { file_teleremote_proto_init() }
+func file_teleremote_proto_init() {
+	if File_teleremote_proto != nil {
 		return
 	}
-	file_pb_teleremote_proto_msgTypes[0].OneofWrappers = []any{
+	file_teleremote_proto_msgTypes[0].OneofWrappers = []any{
 		(*ComponentMessage_Registration)(nil),
 		(*ComponentMessage_Telemetry)(nil),
 		(*ComponentMessage_Qmsg)(nil),
 	}
-	file_pb_teleremote_proto_msgTypes[2].OneofWrappers = []any{}
+	file_teleremote_proto_msgTypes[2].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pb_teleremote_proto_rawDesc), len(file_pb_teleremote_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_teleremote_proto_rawDesc), len(file_teleremote_proto_rawDesc)),
 			NumEnums:      1,
 			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_pb_teleremote_proto_goTypes,
-		DependencyIndexes: file_pb_teleremote_proto_depIdxs,
-		EnumInfos:         file_pb_teleremote_proto_enumTypes,
-		MessageInfos:      file_pb_teleremote_proto_msgTypes,
+		GoTypes:           file_teleremote_proto_goTypes,
+		DependencyIndexes: file_teleremote_proto_depIdxs,
+		EnumInfos:         file_teleremote_proto_enumTypes,
+		MessageInfos:      file_teleremote_proto_msgTypes,
 	}.Build()
-	File_pb_teleremote_proto = out.File
-	file_pb_teleremote_proto_goTypes = nil
-	file_pb_teleremote_proto_depIdxs = nil
+	File_teleremote_proto = out.File
+	file_teleremote_proto_goTypes = nil
+	file_teleremote_proto_depIdxs = nil
 }

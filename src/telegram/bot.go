@@ -3,25 +3,35 @@ package telegram
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
-	"github.com/Bastien-Antigravity/TeleRemote/internal/config"
-	"github.com/Bastien-Antigravity/TeleRemote/internal/grpc"
+	"tele-remote/src/config"
+
+	"tele-remote/src/grpc_control"
 	"github.com/Bastien-Antigravity/flexible-logger/src/interfaces"
 	tb "gopkg.in/telebot.v3"
 )
 
+// -----------------------------------------------------------------------------
+// Bot holds the telegram connection, config, and state references
 type Bot struct {
 	b       *tb.Bot
 	log     interfaces.Logger
 	cfg     *config.Config
-	grpcSrv *grpc.Server
+	grpcSrv *grpc_control.Server
 
-	// Handlers structured map
 	Menus map[string]*CommandMenu
+
+	mu           sync.RWMutex
+	dynamicMenus map[string]*ComponentMenu
+	actionMap    map[string]CallbackAction
+	cbCounter    int
 }
 
-func NewBot(cfg *config.Config, log interfaces.Logger, grpcSrv *grpc.Server) (*Bot, error) {
+// -----------------------------------------------------------------------------
+// NewBot registers Telebot settings and initializes memory maps
+func NewBot(cfg *config.Config, log interfaces.Logger, grpcSrv *grpc_control.Server) (*Bot, error) {
 	pref := tb.Settings{
 		Token:  cfg.TelegramToken,
 		Poller: &tb.LongPoller{Timeout: 10 * time.Second},
@@ -33,14 +43,18 @@ func NewBot(cfg *config.Config, log interfaces.Logger, grpcSrv *grpc.Server) (*B
 	}
 
 	return &Bot{
-		b:       b,
-		log:     log,
-		cfg:     cfg,
-		grpcSrv: grpcSrv,
-		Menus:   make(map[string]*CommandMenu),
+		b:            b,
+		log:          log,
+		cfg:          cfg,
+		grpcSrv:      grpcSrv,
+		Menus:        make(map[string]*CommandMenu),
+		dynamicMenus: make(map[string]*ComponentMenu),
+		actionMap:    make(map[string]CallbackAction),
 	}, nil
 }
 
+// -----------------------------------------------------------------------------
+// Start triggers routing setup, background listeners, and begins polling
 func (bot *Bot) Start(ctx context.Context) {
 	bot.setupRoutes()
 
@@ -54,15 +68,15 @@ func (bot *Bot) Start(ctx context.Context) {
 	bot.b.Start()
 }
 
-// Broadcast sends a message to the configured ChatID
+// -----------------------------------------------------------------------------
+// Broadcast sends a plain text message to the pre-configured ChatID
 func (bot *Bot) Broadcast(msg string) {
 	if bot.cfg.ChatID == "" {
 		bot.log.Warning("Broadcast failed: TB_CHATID not set")
 		return
 	}
-	chat, err := bot.b.ChatByID(0) // Need explicit chatID parsing, handle string logic
+	chat, err := bot.b.ChatByID(0)
 
-	// Temporary parsing logic to integer
 	var chatID int64
 	fmt.Sscanf(bot.cfg.ChatID, "%d", &chatID)
 
@@ -72,55 +86,4 @@ func (bot *Bot) Broadcast(msg string) {
 	if err != nil {
 		bot.log.Error("failed to broadcast telemetry", "err", err)
 	}
-}
-
-func (bot *Bot) setupRoutes() {
-	// Constructing the Main Menu using Command Pattern interfaces inline for brevity
-	menuStart := &tb.ReplyMarkup{}
-
-	btnPowerOff := menuStart.Data("🆘 power off !", "power_off")
-	btnCloseAll := menuStart.Data("⏏️ close all positions", "close_all")
-	btnStrategies := menuStart.Data("🍀 running strategies", "strategies")
-	btnArbitrage := menuStart.Data("📈📉 arbitrage", "arbitrage")
-
-	menuStart.Inline(
-		menuStart.Row(btnPowerOff),
-		menuStart.Row(btnCloseAll),
-		menuStart.Row(btnStrategies),
-		menuStart.Row(btnArbitrage),
-	)
-
-	bot.b.Handle("/start", func(c tb.Context) error {
-		bot.log.Info("User triggered /start", "user", c.Sender().ID)
-		return c.Send("start!", menuStart)
-	})
-
-	bot.b.Handle(&btnPowerOff, func(c tb.Context) error {
-		bot.log.Info("PowerOff triggered via Telegram")
-		bot.grpcSrv.PowerOffAll()
-		c.Send("🆘 Powering off components...")
-		return c.Respond()
-	})
-
-	bot.b.Handle(&btnCloseAll, func(c tb.Context) error {
-		bot.log.Info("CloseAllPositions triggered via Telegram")
-		bot.grpcSrv.StopAllComponents()
-		c.Send("🛑 Calling 'stop' on all components...")
-		return c.Respond()
-	})
-
-	// Fallback logic representing UNDER_CONSTRUCTION
-	bot.b.Handle(&btnStrategies, func(c tb.Context) error {
-		return c.Send("🚧 under construction ...")
-	})
-	bot.b.Handle(&btnArbitrage, func(c tb.Context) error {
-		return c.Send("🚧 under construction ...")
-	})
-}
-
-// Concept for structured command menus if we wanted to build nested structures later
-type CommandMenu struct {
-	Name    string
-	Caption string
-	Markup  *tb.ReplyMarkup
 }

@@ -15,6 +15,8 @@ type Config struct {
 	LogLevel      string `mapstructure:"LOG_LEVEL"`
 }
 
+// -----------------------------------------------------------------------------
+// LoadConfig initializes Viper and parses the environment variables
 func LoadConfig() (*Config, error) {
 	viper.SetEnvPrefix("TELEREMOTE")
 	viper.AutomaticEnv()
