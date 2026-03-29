@@ -1,6 +1,9 @@
 package telegram
 
-import tb "gopkg.in/telebot.v3"
+import (
+	"context"
+	tb "gopkg.in/telebot.v3"
+)
 
 // -----------------------------------------------------------------------------
 // setupRoutes initializes all static handlers and maps fallback dynamic routing
@@ -29,14 +32,26 @@ func (bot *Bot) setupRoutes() {
 
 	bot.b.Handle(&btnPowerOff, func(c tb.Context) error {
 		bot.log.Info("PowerOff triggered via Telegram")
-		bot.grpcSrv.PowerOffAll()
+		
+		bot.mu.RLock()
+		for _, pub := range bot.publishers {
+			pub.PublishCommand(context.Background(), 1, "") // 1 = POWER_OFF
+		}
+		bot.mu.RUnlock()
+
 		c.Send("🆘 Powering off components...")
 		return c.Respond()
 	})
 
 	bot.b.Handle(&btnCloseAll, func(c tb.Context) error {
 		bot.log.Info("CloseAllPositions triggered via Telegram")
-		bot.grpcSrv.StopAllComponents()
+		
+		bot.mu.RLock()
+		for _, pub := range bot.publishers {
+			pub.PublishCommand(context.Background(), 2, "") // 2 = CLOSE_ALL_POSITIONS
+		}
+		bot.mu.RUnlock()
+
 		c.Send("🛑 Calling 'stop' on all components...")
 		return c.Respond()
 	})

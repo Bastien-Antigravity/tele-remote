@@ -6,11 +6,12 @@ import (
 	"os/signal"
 	"syscall"
 	"tele-remote/src/config"
-	"tele-remote/src/grpc_control"
+	"tele-remote/src/interfaces"
+	"tele-remote/src/subscribers"
 	"tele-remote/src/telegram"
 	"time"
 
-	"github.com/Bastien-Antigravity/flexible-logger/src/interfaces"
+	flexlogger "github.com/Bastien-Antigravity/flexible-logger/src/interfaces"
 	"github.com/Bastien-Antigravity/flexible-logger/src/profiles"
 )
 
@@ -24,7 +25,7 @@ func main() {
 	}
 
 	// 2. Setup flexible-logger
-	var appLogger interfaces.Logger
+	var appLogger flexlogger.Logger
 	if cfg.LogLevel == "DEBUG" {
 		appLogger = profiles.NewDevelLogger("TeleRemote")
 	} else {
@@ -41,15 +42,15 @@ func main() {
 	var telemetryCallback func(string)
 	var botInstance *telegram.Bot
 	
-	grpcSrv := grpc_control.NewServer(appLogger, cfg.BindIP, cfg.BindPort, grpc_control.ServerCallbacks{
+	cbs := interfaces.SubscriberCallbacks{
 		OnTelemetry: func(msg string) {
 			if telemetryCallback != nil {
 				telemetryCallback(msg)
 			}
 		},
-		OnRegistration: func(clientID, componentName, menuJSON string) {
+		OnRegistration: func(clientID, componentName, menuJSON string, pub interfaces.Publisher) {
 			if botInstance != nil {
-				botInstance.OnComponentConnected(clientID, componentName, menuJSON)
+				botInstance.OnComponentConnected(clientID, componentName, menuJSON, pub)
 			}
 		},
 		OnDisconnect: func(clientID string) {
@@ -57,9 +58,13 @@ func main() {
 				botInstance.OnComponentDisconnected(clientID)
 			}
 		},
-	})
+	}
 
-	bot, err := telegram.NewBot(cfg, appLogger, grpcSrv)
+	grpcSub := subscribers.NewGrpcSubscriber(appLogger, cfg.BindIP, cfg.BindPort)
+	natsSub := subscribers.NewNatsSubscriber(cfg, appLogger)
+	safeSub := subscribers.NewSafeSocketSubscriber(cfg, appLogger)
+
+	bot, err := telegram.NewBot(cfg, appLogger)
 	botInstance = bot
 	if err != nil {
 		appLogger.Error("Failed to init telegram bot", "err", err)
@@ -72,9 +77,21 @@ func main() {
 
 	// 4. Start concurrent services
 	go func() {
-		if err := grpcSrv.Start(ctx); err != nil {
+		if err := grpcSub.StartListen(ctx, cbs); err != nil {
 			appLogger.Error("gRPC server crashed", "err", err)
 			cancel()
+		}
+	}()
+
+	go func() {
+		if err := natsSub.StartListen(ctx, cbs); err != nil {
+			appLogger.Error("NATS server crashed", "err", err)
+		}
+	}()
+
+	go func() {
+		if err := safeSub.StartListen(ctx, cbs); err != nil {
+			appLogger.Error("SafeSocket server crashed", "err", err)
 		}
 	}()
 

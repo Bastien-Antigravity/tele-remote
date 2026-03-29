@@ -28,6 +28,8 @@ message ComponentMessage {
 message Registration {
     // A JSON string representing a tree of menus and commands
     string menu_json = 1; 
+    string sub_type = 2;
+    string pub_config = 3;
 }
 
 message QueueMessage {

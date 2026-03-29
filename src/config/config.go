@@ -7,12 +7,25 @@ import (
 	"github.com/spf13/viper"
 )
 
+type NATSConfig struct {
+	Servers       []string `mapstructure:"servers"`
+	ClientID      string   `mapstructure:"client_id"`
+	Subject       string   `mapstructure:"subject"`
+	SubjectPrefix string   `mapstructure:"subject_prefix"`
+}
+
+type SafeSocketConfig struct {
+	Port int `mapstructure:"port"`
+}
+
 type Config struct {
-	TelegramToken string `mapstructure:"TB_TOKEN"`
-	ChatID        string `mapstructure:"TB_CHATID"`
-	BindIP        string `mapstructure:"TB_IP"`
-	BindPort      int    `mapstructure:"TB_PORT"`
-	LogLevel      string `mapstructure:"LOG_LEVEL"`
+	TelegramToken string           `mapstructure:"TB_TOKEN"`
+	ChatID        string           `mapstructure:"TB_CHATID"`
+	BindIP        string           `mapstructure:"TB_IP"`
+	BindPort      int              `mapstructure:"TB_PORT"`
+	LogLevel      string           `mapstructure:"LOG_LEVEL"`
+	Nats          NATSConfig       `mapstructure:"nats"`
+	SafeSocket    SafeSocketConfig `mapstructure:"safesocket"`
 }
 
 // -----------------------------------------------------------------------------

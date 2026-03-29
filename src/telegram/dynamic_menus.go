@@ -1,17 +1,19 @@
 package telegram
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
-	"tele-remote/src/grpc_control"
+	
+	"tele-remote/src/interfaces"
 
 	tb "gopkg.in/telebot.v3"
 )
 
 // -----------------------------------------------------------------------------
 // OnComponentConnected is triggered when a client connects via gRPC
-func (bot *Bot) OnComponentConnected(clientID, componentName, menuJSON string) {
+func (bot *Bot) OnComponentConnected(clientID, componentName, menuJSON string, pub interfaces.Publisher) {
 	if menuJSON == "" {
 		return
 	}
@@ -26,6 +28,7 @@ func (bot *Bot) OnComponentConnected(clientID, componentName, menuJSON string) {
 		compMenu.Name = componentName
 	}
 	bot.dynamicMenus[clientID] = &compMenu
+	bot.publishers[clientID] = pub
 	bot.mu.Unlock()
 
 	bot.log.Info("Registered dynamic menu for client", "client", clientID, "name", compMenu.Name)
@@ -36,6 +39,10 @@ func (bot *Bot) OnComponentConnected(clientID, componentName, menuJSON string) {
 // OnComponentDisconnected is triggered when a client drops the gRPC connection
 func (bot *Bot) OnComponentDisconnected(clientID string) {
 	bot.mu.Lock()
+	if pub, exists := bot.publishers[clientID]; exists {
+		pub.Close()
+		delete(bot.publishers, clientID)
+	}
 	if compMenu, exists := bot.dynamicMenus[clientID]; exists {
 		bot.log.Info("Removing dynamic menu for client", "client", clientID)
 		bot.Broadcast(fmt.Sprintf("🔌 Disconnected node: %s", compMenu.Name))
@@ -105,7 +112,16 @@ func (bot *Bot) handleDynamicCallback(c tb.Context) error {
 		return bot.renderSubMenu(c, action)
 	case "execute":
 		bot.log.Info("Triggering dynamic command", "cmd", action.Command, "client", action.ClientID)
-		err := bot.grpcSrv.TargetedBroadcastCommand(action.ClientID, grpc_control.BotCommand_CUSTOM_COMMAND, action.Command)
+		
+		bot.mu.RLock()
+		pub, exists := bot.publishers[action.ClientID]
+		bot.mu.RUnlock()
+		
+		if !exists {
+			return c.Respond(&tb.CallbackResponse{Text: "Publisher not found or node disconnected."})
+		}
+		
+		err := pub.PublishCommand(context.Background(), 99, action.Command)
 		if err != nil {
 			return c.Respond(&tb.CallbackResponse{Text: "Error communicating with node."})
 		}

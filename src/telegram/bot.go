@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"tele-remote/src/config"
+	"tele-remote/src/interfaces"
 
-	"tele-remote/src/grpc_control"
-	"github.com/Bastien-Antigravity/flexible-logger/src/interfaces"
+	flexlogger "github.com/Bastien-Antigravity/flexible-logger/src/interfaces"
 	tb "gopkg.in/telebot.v3"
 )
 
@@ -17,9 +17,8 @@ import (
 // Bot holds the telegram connection, config, and state references
 type Bot struct {
 	b       *tb.Bot
-	log     interfaces.Logger
+	log     flexlogger.Logger
 	cfg     *config.Config
-	grpcSrv *grpc_control.Server
 
 	Menus map[string]*CommandMenu
 
@@ -27,11 +26,12 @@ type Bot struct {
 	dynamicMenus map[string]*ComponentMenu
 	actionMap    map[string]CallbackAction
 	cbCounter    int
+	publishers   map[string]interfaces.Publisher
 }
 
 // -----------------------------------------------------------------------------
 // NewBot registers Telebot settings and initializes memory maps
-func NewBot(cfg *config.Config, log interfaces.Logger, grpcSrv *grpc_control.Server) (*Bot, error) {
+func NewBot(cfg *config.Config, log flexlogger.Logger) (*Bot, error) {
 	pref := tb.Settings{
 		Token:  cfg.TelegramToken,
 		Poller: &tb.LongPoller{Timeout: 10 * time.Second},
@@ -46,10 +46,10 @@ func NewBot(cfg *config.Config, log interfaces.Logger, grpcSrv *grpc_control.Ser
 		b:            b,
 		log:          log,
 		cfg:          cfg,
-		grpcSrv:      grpcSrv,
 		Menus:        make(map[string]*CommandMenu),
 		dynamicMenus: make(map[string]*ComponentMenu),
 		actionMap:    make(map[string]CallbackAction),
+		publishers:   make(map[string]interfaces.Publisher),
 	}, nil
 }
 

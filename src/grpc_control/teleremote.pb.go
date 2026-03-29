@@ -204,6 +204,8 @@ type Registration struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// A JSON string representing a tree of menus and commands
 	MenuJson      string `protobuf:"bytes,1,opt,name=menu_json,json=menuJson,proto3" json:"menu_json,omitempty"`
+	SubType       string `protobuf:"bytes,2,opt,name=sub_type,json=subType,proto3" json:"sub_type,omitempty"`
+	PubConfig     string `protobuf:"bytes,3,opt,name=pub_config,json=pubConfig,proto3" json:"pub_config,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -241,6 +243,20 @@ func (*Registration) Descriptor() ([]byte, []int) {
 func (x *Registration) GetMenuJson() string {
 	if x != nil {
 		return x.MenuJson
+	}
+	return ""
+}
+
+func (x *Registration) GetSubType() string {
+	if x != nil {
+		return x.SubType
+	}
+	return ""
+}
+
+func (x *Registration) GetPubConfig() string {
+	if x != nil {
+		return x.PubConfig
 	}
 	return ""
 }
@@ -395,9 +411,12 @@ const file_teleremote_proto_rawDesc = "" +
 	"\fregistration\x18\x04 \x01(\v2\x18.teleremote.RegistrationH\x00R\fregistration\x12\x1e\n" +
 	"\ttelemetry\x18\x05 \x01(\tH\x00R\ttelemetry\x12.\n" +
 	"\x04qmsg\x18\x06 \x01(\v2\x18.teleremote.QueueMessageH\x00R\x04qmsgB\t\n" +
-	"\apayload\"+\n" +
+	"\apayload\"e\n" +
 	"\fRegistration\x12\x1b\n" +
-	"\tmenu_json\x18\x01 \x01(\tR\bmenuJson\"\xa4\x01\n" +
+	"\tmenu_json\x18\x01 \x01(\tR\bmenuJson\x12\x19\n" +
+	"\bsub_type\x18\x02 \x01(\tR\asubType\x12\x1d\n" +
+	"\n" +
+	"pub_config\x18\x03 \x01(\tR\tpubConfig\"\xa4\x01\n" +
 	"\fQueueMessage\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x10\n" +
 	"\x03msg\x18\x02 \x01(\tR\x03msg\x12\x1b\n" +
