@@ -1,0 +1,20 @@
+services:
+  tele-remote:
+    build: .
+    image: tele-remote:latest
+    container_name: tele-remote
+    restart: unless-stopped
+    ports:
+      - "50051:50051"
+    environment:
+      # Pass host OS environment variables into the container
+      - TELEREMOTE_TB_TOKEN
+      - TELEREMOTE_TB_CHATID
+      - TELEREMOTE_TB_IP
+      - TELEREMOTE_TB_PORT
+      - TELEREMOTE_LOG_LEVEL
+      - TELEREMOTE_NATS_SERVERS
+networks:
+  default:
+    name: teleremote_network
+    external: true
