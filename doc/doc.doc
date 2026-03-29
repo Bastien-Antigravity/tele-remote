@@ -1,0 +1,62 @@
+=============================================================================
+TELE-REMOTE COMMUNICATION ARCHITECTURE (RESUME)
+=============================================================================
+
+This document summarizes the current data flow and messaging paradigms used
+inside the Tele-Remote ecosystem.
+
+-----------------------------------------------------------------------------
+1. HIGH-LEVEL DATA FLOW (ASCII)
+-----------------------------------------------------------------------------
+
+         [ TELEGRAM APP ]           [ TELE-REMOTE SERVER (GO) ]        [ CLIENT COMPONENTS ]
+                |                             |                             |
+                | (1) Command (Inline Button) |                             |
+                |---------------------------->|                             |
+                |                             | (2) PublishCommand (ctx)    |
+                |                             |---------------------------->|
+                |                             |                             |
+                |                             | (3) Execute Logic (Bot)     |
+                |                             |<----------------------------|
+                |                             |                             |
+                | (4) Telemetry / Log Update  |                             |
+                |<----------------------------|                             |
+                |                             | (5) Stream / Post Data      |
+                |                             |<----------------------------|
+                |                             |                             |
+
+-----------------------------------------------------------------------------
+2. COMPONENT REGISTRATION (MENU-ON-THE-FLY)
+-----------------------------------------------------------------------------
+
+When a client (Trading Bot, Ingestor, etc.) connects, it performs a
+"Registration" handshake. It sends a structured JSON payload containing its:
+- Component Name
+- Registration Metadata
+- Menu JSON (recursive tree of buttons, commands, and sub-menus)
+
+Tele-Remote parses this on-the-fly, dynamically builds a Telegram keyboard,
+and maps every button click back to the specific "Publisher" associated
+with that connection.
+
+-----------------------------------------------------------------------------
+3. TRANSPORT MULTIPLEXING
+-----------------------------------------------------------------------------
+
+Tele-Remote is protocol-agnostic. It supports three primary transport methods:
+
+a) gRPC:        High-performance, typed bidirectional streams.
+b) NATS:        Distributed pub/sub via NATS Jetstream topics.
+c) SafeSocket:  Low-overhead TCP/Unix socket communication.
+
+-----------------------------------------------------------------------------
+4. SHARED DEPENDENCIES
+-----------------------------------------------------------------------------
+
+- flexible-logger:    Unified logging format across all Bastien's services.
+- message-serializers: Shared Go library for GOB/JSON binary marshaling.
+- distributed-config: Remote configuration for cloud-native deployment.
+
+=============================================================================
+EOF
+=============================================================================

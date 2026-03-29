@@ -6,58 +6,64 @@ It provides an efficient two-way communication channel:
 1. **Telemetry & Logging:** Connected components can stream logs, alerts, and structured messages (Qmsg) to Tele-Remote, which routes them directly to a designated Telegram chat.
 2. **Command & Control:** You can issue commands via Telegram (e.g., *Power Off*, *Close All Positions*) which are instantly broadcast to all connected components.
 
-## Implementations
+## Communication Architecture (Pub/Sub)
 
-The project contains two distinct implementations for the server component:
+Tele-Remote uses a transport-agnostic **Publisher/Subscriber** interface model. This allows the system to seamlessly handle multiple connection protocols without changing the Telegram Bot logic:
 
-### 1. Go Implementation (gRPC)
-The modern, high-performance version is written in Go and utilizes **gRPC** for robust, typed, and bidirectional streaming between the server and the components. 
+- **gRPC (Streams):** Modern, high-performance, typed bidirectional streaming.
+- **NATS (Topics):** Distributed messaging using NATS Core or Jetstream.
+- **SafeSocket (TCP/Unix):** Low-overhead, binary-safe socket communication.
 
-- **Codebase:** Located in `cmd/`, `src/grpc_control/`, `src/telegram/`, and `src/config/`.
-- **Protocol:** Uses Protocol Buffers (`src/grpc_control/teleremote.proto`) natively, with `ComponentMessage` structure handling Registration, Telemetry, and Queue Messages (Qmsg).
-- **Control Flow:** When the user clicks the "🆘 power off !" or "⏏️ close all positions" buttons on Telegram, a `BotCommand_POWER_OFF` or `BotCommand_CLOSE_ALL_POSITIONS` enum is broadcasted via gRPC stream to all connected components.
+Each connection is wrapped as an internal `interfaces.Publisher`, ensuring that commands are routed precisely to the correct client regardless of the protocol.
 
-### 2. Python Implementation (Raw TCP Sockets)
-The legacy/alternative version is written in Python and uses raw TCP sockets with an overarching custom messaging protocol. 
+## Shared Infrastructure
 
-- **Codebase:** The primary entry point is `tele_remote.py`, alongside supporting `.py` files (`tele_button.py`, `tele_command.py`, `tele_funcs.py`).
-- **Modes:** Supports both asynchronous loops (`asyncio`) and traditional threading architectures via the `TELE_REMOTE_SERVER_TYPE` toggle.
-- **Dependencies:** Relies on a broader `common` library structure, looking for database, configuration, and thread queuing mechanics typically mapped to the parent directory.
+Tele-Remote integrates with a suite of centralized Go libraries maintained across the ecosystem:
+
+- **[message-serializers](https://github.com/Bastien-Antigravity/message-serializers):** High-efficiency JSON/Binary marshaling.
+- **[flexible-logger](https://github.com/Bastien-Antigravity/flexible-logger):** Unified structured logging.
+- **distributed-config:** Global configuration for clustered deployments.
 
 ## Configuration & Setup
 
 ### Go Service
 
-The Go server utilizes `viper` to process configurations. You can configure it using a `config.yaml` file in the root directory, or via Environment Variables prefixed with `TELEREMOTE_`.
+The Go server utilizes `viper` and `distributed-config` for unified settings.
 
-**Key Variables:**
-* `TELEREMOTE_TB_TOKEN` (or `TB_TOKEN` in yaml): Your Telegram Bot Token.
-* `TELEREMOTE_TB_CHATID` (or `TB_CHATID` in yaml): The Int64 ID of the target Telegram chat room/user.
-* `TELEREMOTE_TB_IP` (or `TB_IP` in yaml): IP on which the gRPC server will bind (default: `0.0.0.0`).
-* `TELEREMOTE_TB_PORT` (or `TB_PORT` in yaml): gRPC Port (default: `50051`).
-* `TELEREMOTE_LOG_LEVEL` (or `LOG_LEVEL` in yaml): Logging verbosity, e.g., `DEBUG` or `INFO`.
+**Key Configuration (config.yaml):**
+```yaml
+TB_TOKEN: "your_bot_token"
+TB_CHATID: "your_chat_id"
+TB_IP: "0.0.0.0"
+TB_PORT: 50051  # gRPC binding port
+nats:
+  servers: ["nats://localhost:4222"]
+  subject_prefix: "teleremote"
+safesocket:
+  port: 6000
+```
 
 **Running the Go Server:**
 ```bash
 go mod tidy
-go build ./cmd/teleremote/...
-./teleremote
+go build ./cmd/tele-remote/...
+./tele-remote
 ```
 
-### Python Service
+### Python Service (Legacy)
 
-If running the Python implementation, rely on flags or the `common.config` configuration path loading approach:
+The original Python implementation using raw TCP sockets is located in `legacy-py/`.
 
 ```bash
-python3 tele_remote.py --name "tele_remote" --log_level 10
+python3 legacy-py/tele_remote.py --name "tele_remote" --log_level 10
 ```
 
 ## Available Telegram Commands
-When the user sends `/start` to the Bot, it replies with a custom Reply Markup keyboard containing actionable buttons:
+When the user sends `/start` to the Bot, it replies with an interactive keyboard:
 * **🆘 power off !** : Gracefully signals all components to power off.
-* **⏏️ close all positions** : Signals connected systems to halt strategies and close open positions immediately.
-* **🍀 running strategies** : (WIP) Poll active strategies.
-* **📈📉 arbitrage** : (WIP) Execute/poll arbitrage details.
+* **⏏️ close all positions** : Signals connected systems to halt strategies and close open positions.
+* **🔌 Connected Nodes** : Lists all active components and dynamically generates their command menus on-the-fly!
 
-## Adding a New Client Component (Go)
-To connect a new process to Tele-Remote, integrate a gRPC client using the `teleremote.pb.go` generated classes. Connect to the address specified in config, and stream `ComponentMessage` structures to register. Read incoming streams from the server to listen for `BotCommand` triggers.
+## Documentation
+For a detailed diagram and resume of the data flow, please see:
+- [doc/doc.doc](file:///Users/imac/Desktop/tele-remote/doc/doc.doc)
