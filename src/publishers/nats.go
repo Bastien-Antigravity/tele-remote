@@ -5,16 +5,17 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"tele-remote/src/interfaces"
+	msg_interfaces "github.com/Bastien-Antigravity/message-serializers/src/interfaces"
 )
 
 // NatsPublisher uses NATS core to publish commands as JSON objects to components
 type NatsPublisher struct {
 	nc         *nats.Conn
 	subject    string
-	serializer interfaces.ISerializer
+	serializer msg_interfaces.ISerializer
 }
 
-func NewNatsPublisher(nc *nats.Conn, subject string, ser interfaces.ISerializer) interfaces.Publisher {
+func NewNatsPublisher(nc *nats.Conn, subject string, ser msg_interfaces.ISerializer) interfaces.Publisher {
 	return &NatsPublisher{nc: nc, subject: subject, serializer: ser}
 }
 

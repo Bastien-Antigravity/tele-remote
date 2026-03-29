@@ -14,6 +14,7 @@ import (
 )
 
 // -----------------------------------------------------------------------------
+
 // Bot holds the telegram connection, config, and state references
 type Bot struct {
 	b       *tb.Bot
@@ -30,6 +31,7 @@ type Bot struct {
 }
 
 // -----------------------------------------------------------------------------
+
 // NewBot registers Telebot settings and initializes memory maps
 func NewBot(cfg *config.Config, log flexlogger.Logger) (*Bot, error) {
 	pref := tb.Settings{
@@ -54,6 +56,7 @@ func NewBot(cfg *config.Config, log flexlogger.Logger) (*Bot, error) {
 }
 
 // -----------------------------------------------------------------------------
+
 // Start triggers routing setup, background listeners, and begins polling
 func (bot *Bot) Start(ctx context.Context) {
 	bot.setupRoutes()
@@ -69,20 +72,19 @@ func (bot *Bot) Start(ctx context.Context) {
 }
 
 // -----------------------------------------------------------------------------
+
 // Broadcast sends a plain text message to the pre-configured ChatID
 func (bot *Bot) Broadcast(msg string) {
 	if bot.cfg.ChatID == "" {
 		bot.log.Warning("Broadcast failed: TB_CHATID not set")
 		return
 	}
-	chat, err := bot.b.ChatByID(0)
 
 	var chatID int64
 	fmt.Sscanf(bot.cfg.ChatID, "%d", &chatID)
+	chat := &tb.Chat{ID: chatID}
 
-	chat = &tb.Chat{ID: chatID}
-
-	_, err = bot.b.Send(chat, msg)
+	_, err := bot.b.Send(chat, msg)
 	if err != nil {
 		bot.log.Error("failed to broadcast telemetry", "err", err)
 	}

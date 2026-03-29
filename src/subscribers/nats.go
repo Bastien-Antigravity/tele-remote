@@ -8,9 +8,9 @@ import (
 	"tele-remote/src/config"
 	"tele-remote/src/interfaces"
 	"tele-remote/src/publishers"
-	"tele-remote/src/serializers"
 
 	flexlogger "github.com/Bastien-Antigravity/flexible-logger/src/interfaces"
+	msg_serializers "github.com/Bastien-Antigravity/message-serializers/src/serializers"
 	"github.com/nats-io/nats.go"
 )
 
@@ -38,8 +38,8 @@ func (s *NatsSubscriber) StartListen(ctx context.Context, cbs interfaces.Subscri
 	}
 	s.nc = nc
 
-	// Use our newly generalized JSON serializer for NATS
-	ser := &serializers.JSONSerializer{}
+	// Use the shared JSON serializer
+	ser := msg_serializers.NewJSONSerializer()
 
 	s.log.Info("Starting NATS Subscriber", "subject", s.cfg.Nats.SubjectPrefix+".>")
 

@@ -4,197 +4,218 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
-	
+
 	"tele-remote/src/interfaces"
 
 	tb "gopkg.in/telebot.v3"
 )
 
 // -----------------------------------------------------------------------------
-// OnComponentConnected is triggered when a client connects via gRPC
+
+// ComponentMenu holds the structured tree for a single registered component
+type ComponentMenu struct {
+	Name     string
+	ClientID string
+	Root     *CommandMenu
+}
+
+// -----------------------------------------------------------------------------
+
+// OnComponentConnected is triggered when a client connects via gRPC or NATS
 func (bot *Bot) OnComponentConnected(clientID, componentName, menuJSON string, pub interfaces.Publisher) {
 	if menuJSON == "" {
 		return
 	}
-	var compMenu ComponentMenu
-	if err := json.Unmarshal([]byte(menuJSON), &compMenu); err != nil {
-		bot.log.Error("Failed to parse menu JSON", "err", err, "client", clientID)
-		return
-	}
 
 	bot.mu.Lock()
-	if compMenu.Name == "" {
-		compMenu.Name = componentName
-	}
-	bot.dynamicMenus[clientID] = &compMenu
 	bot.publishers[clientID] = pub
 	bot.mu.Unlock()
 
-	bot.log.Info("Registered dynamic menu for client", "client", clientID, "name", compMenu.Name)
-	bot.Broadcast(fmt.Sprintf("🔌 Connected node: %s", compMenu.Name))
-}
-
-// -----------------------------------------------------------------------------
-// OnComponentDisconnected is triggered when a client drops the gRPC connection
-func (bot *Bot) OnComponentDisconnected(clientID string) {
-	bot.mu.Lock()
-	if pub, exists := bot.publishers[clientID]; exists {
-		pub.Close()
-		delete(bot.publishers, clientID)
+	var rawItems []map[string]interface{}
+	if err := json.Unmarshal([]byte(menuJSON), &rawItems); err != nil {
+		bot.log.Error("Failed to parse component menu JSON", "err", err, "json", menuJSON)
+		return
 	}
-	if compMenu, exists := bot.dynamicMenus[clientID]; exists {
-		bot.log.Info("Removing dynamic menu for client", "client", clientID)
-		bot.Broadcast(fmt.Sprintf("🔌 Disconnected node: %s", compMenu.Name))
-		delete(bot.dynamicMenus, clientID)
+
+	root := &CommandMenu{
+		Title: fmt.Sprintf("📦 %s", componentName),
+		Rows:  []CommandRow{},
+	}
+
+	for _, item := range rawItems {
+		row := bot.parseMenuRow(item, clientID)
+		if len(row.Buttons) > 0 {
+			root.Rows = append(root.Rows, row)
+		}
+	}
+
+	bot.mu.Lock()
+	bot.dynamicMenus[clientID] = &ComponentMenu{
+		Name:     componentName,
+		ClientID: clientID,
+		Root:     root,
 	}
 	bot.mu.Unlock()
+
+	bot.log.Info("Dynamic menu registered", "client", clientID, "rows", len(root.Rows))
 }
 
 // -----------------------------------------------------------------------------
-// registerAction generates and stores a unique callback action ID
-func (bot *Bot) registerAction(action CallbackAction) string {
+
+// OnComponentDisconnected cleans up memory and publishers
+func (bot *Bot) OnComponentDisconnected(clientID string) {
+	bot.mu.Lock()
+	defer bot.mu.Unlock()
+
+	delete(bot.dynamicMenus, clientID)
+	delete(bot.publishers, clientID)
+	bot.log.Info("Component disconnected", "client", clientID)
+}
+
+// -----------------------------------------------------------------------------
+
+func (bot *Bot) parseMenuRow(data map[string]interface{}, clientID string) CommandRow {
+	row := CommandRow{Buttons: []CommandButton{}}
+
+	// If it's a list (row), iterate
+	if btns, ok := data["buttons"].([]interface{}); ok {
+		for _, b := range btns {
+			if bMap, ok := b.(map[string]interface{}); ok {
+				row.Buttons = append(row.Buttons, bot.parseButton(bMap, clientID))
+			}
+		}
+	} else {
+		// Single button row
+		row.Buttons = append(row.Buttons, bot.parseButton(data, clientID))
+	}
+
+	return row
+}
+
+// -----------------------------------------------------------------------------
+
+func (bot *Bot) parseButton(data map[string]interface{}, clientID string) CommandButton {
+	label := data["label"].(string)
+
+	// If it has sub-buttons, it's a sub-menu
+	if sub, ok := data["menu"].([]interface{}); ok {
+		subMenu := &CommandMenu{Title: label, Rows: []CommandRow{}}
+		for _, s := range sub {
+			if sMap, ok := s.(map[string]interface{}); ok {
+				subMenu.Rows = append(subMenu.Rows, bot.parseMenuRow(sMap, clientID))
+			}
+		}
+		return CommandButton{Label: label, NextMenu: subMenu}
+	}
+
+	// Otherwise, it's a command
+	cmdType := int32(0)
+	if val, ok := data["cmd_type"].(float64); ok {
+		cmdType = int32(val)
+	}
+	payload := ""
+	if p, ok := data["payload"].(string); ok {
+		payload = p
+	}
+
+	uniqueID := bot.registerAction(func(ctx tb.Context) error {
+		bot.mu.RLock()
+		pub, ok := bot.publishers[clientID]
+		bot.mu.RUnlock()
+
+		if !ok {
+			return ctx.Send("❌ Component disconnected.")
+		}
+
+		bot.log.Info("Executing component command", "client", clientID, "type", cmdType)
+		if err := pub.PublishCommand(context.Background(), cmdType, payload); err != nil {
+			return ctx.Send(fmt.Sprintf("⚠️ Failed to send command: %v", err))
+		}
+		return ctx.Send(fmt.Sprintf("✅ Sent: %s", label))
+	})
+
+	return CommandButton{Label: label, CallbackData: uniqueID}
+}
+
+// -----------------------------------------------------------------------------
+
+func (bot *Bot) registerAction(fn CallbackAction) string {
 	bot.mu.Lock()
 	defer bot.mu.Unlock()
 	bot.cbCounter++
 	id := fmt.Sprintf("dyn_%d", bot.cbCounter)
-	bot.actionMap[id] = action
+	bot.actionMap[id] = fn
 	return id
 }
 
 // -----------------------------------------------------------------------------
-// showNodesMenu renders the list of connected nodes with dynamic menus
+
+// showNodesMenu displays the list of currently connected components
 func (bot *Bot) showNodesMenu(c tb.Context) error {
 	bot.mu.RLock()
 	defer bot.mu.RUnlock()
 
 	if len(bot.dynamicMenus) == 0 {
-		return c.Send("No connected nodes available at the moment.")
+		return c.Send("📭 No components currently connected.")
 	}
 
 	menu := &tb.ReplyMarkup{}
 	var rows []tb.Row
-	for clientID, compMenu := range bot.dynamicMenus {
-		actionID := bot.registerAction(CallbackAction{
-			Type:     "node_main",
-			ClientID: clientID,
-			Path:     []int{},
+	for _, m := range bot.dynamicMenus {
+		// Create a unique action for showing this component's root menu
+		btnID := bot.registerAction(func(ctx tb.Context) error {
+			return bot.renderMenu(ctx, m.Root)
 		})
-		btn := menu.Data(compMenu.Name, actionID)
-		rows = append(rows, menu.Row(btn))
+		rows = append(rows, menu.Row(menu.Data(m.Name, btnID)))
 	}
+
 	menu.Inline(rows...)
-	return c.Send("Select a Node:", menu)
+	return c.Send("🔌 Connected Nodes:", menu)
 }
 
 // -----------------------------------------------------------------------------
-// handleDynamicCallback routes inline callbacks to requested submenus or custom commands
+
+// handleDynamicCallback routes any non-static inline buttons to the actionMap
 func (bot *Bot) handleDynamicCallback(c tb.Context) error {
-	cbData := strings.TrimSpace(c.Callback().Data)
-
-	idx := strings.LastIndex(cbData, "|")
-	if idx >= 0 {
-		cbData = cbData[idx+1:]
-	} else {
-		cbData = strings.TrimLeft(cbData, "\f")
-	}
-
+	data := c.Callback().Data
 	bot.mu.RLock()
-	action, ok := bot.actionMap[cbData]
+	fn, ok := bot.actionMap[data]
 	bot.mu.RUnlock()
 
 	if !ok {
-		return c.Respond(&tb.CallbackResponse{Text: "Expired or invalid menu action."})
-	}
-
-	switch action.Type {
-	case "node_main", "node_sub":
-		return bot.renderSubMenu(c, action)
-	case "execute":
-		bot.log.Info("Triggering dynamic command", "cmd", action.Command, "client", action.ClientID)
-		
-		bot.mu.RLock()
-		pub, exists := bot.publishers[action.ClientID]
-		bot.mu.RUnlock()
-		
-		if !exists {
-			return c.Respond(&tb.CallbackResponse{Text: "Publisher not found or node disconnected."})
-		}
-		
-		err := pub.PublishCommand(context.Background(), 99, action.Command)
-		if err != nil {
-			return c.Respond(&tb.CallbackResponse{Text: "Error communicating with node."})
-		}
-		c.Send("✅ Command sent to node.")
+		// Silent ignore or error
 		return c.Respond()
 	}
 
-	return c.Respond()
+	return fn(c)
 }
 
 // -----------------------------------------------------------------------------
-// renderSubMenu fetches the target nested menu and renders it
-func (bot *Bot) renderSubMenu(c tb.Context, action CallbackAction) error {
-	bot.mu.RLock()
-	compMenu, exists := bot.dynamicMenus[action.ClientID]
-	bot.mu.RUnlock()
 
-	if !exists {
-		return c.Respond(&tb.CallbackResponse{Text: "Node is no longer connected."})
-	}
-
-	menu := &tb.ReplyMarkup{}
+// renderMenu recursively builds and displays a CommandMenu
+func (bot *Bot) renderMenu(c tb.Context, m *CommandMenu) error {
+	menuMarkup := &tb.ReplyMarkup{}
 	var rows []tb.Row
 
-	currentItems := compMenu.Menu
-	navName := compMenu.Name
-	for _, p := range action.Path {
-		if p >= 0 && p < len(currentItems) {
-			navName = currentItems[p].Label
-			currentItems = currentItems[p].SubMenus
-		} else {
-			return c.Respond(&tb.CallbackResponse{Text: "Menu path invalid."})
+	for _, row := range m.Rows {
+		var btns []tb.Btn
+		for _, b := range row.Buttons {
+			var btn tb.Btn
+			if b.NextMenu != nil {
+				// Submenu button
+				btnID := bot.registerAction(func(ctx tb.Context) error {
+					return bot.renderMenu(ctx, b.NextMenu)
+				})
+				btn = menuMarkup.Data(b.Label, btnID)
+			} else {
+				// Command button
+				btn = menuMarkup.Data(b.Label, b.CallbackData)
+			}
+			btns = append(btns, btn)
 		}
+		rows = append(rows, menuMarkup.Row(btns...))
 	}
 
-	for i, item := range currentItems {
-		newPath := append([]int(nil), action.Path...)
-		newPath = append(newPath, i)
-
-		if item.Command != "" {
-			actionID := bot.registerAction(CallbackAction{
-				Type:     "execute",
-				ClientID: action.ClientID,
-				Command:  item.Command,
-			})
-			btn := menu.Data(item.Label, actionID)
-			rows = append(rows, menu.Row(btn))
-		} else if len(item.SubMenus) > 0 {
-			actionID := bot.registerAction(CallbackAction{
-				Type:     "node_sub",
-				ClientID: action.ClientID,
-				Path:     newPath,
-			})
-			btn := menu.Data("📁 "+item.Label, actionID)
-			rows = append(rows, menu.Row(btn))
-		}
-	}
-
-	if len(action.Path) > 0 {
-		backPath := action.Path[:len(action.Path)-1]
-		backActionID := bot.registerAction(CallbackAction{
-			Type:     "node_sub",
-			ClientID: action.ClientID,
-			Path:     backPath,
-		})
-		backBtn := menu.Data("🔙 Back", backActionID)
-		rows = append(rows, menu.Row(backBtn))
-	}
-
-	menu.Inline(rows...)
-	_, err := bot.b.Edit(c.Message(), "Menu: "+navName, menu)
-	if err != nil {
-		bot.b.Send(c.Sender(), "Menu: "+navName, menu)
-	}
-	return c.Respond()
+	menuMarkup.Inline(rows...)
+	return c.Edit(m.Title, menuMarkup)
 }

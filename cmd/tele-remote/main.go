@@ -5,11 +5,12 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
+
 	"tele-remote/src/config"
 	"tele-remote/src/interfaces"
 	"tele-remote/src/subscribers"
 	"tele-remote/src/telegram"
-	"time"
 
 	flexlogger "github.com/Bastien-Antigravity/flexible-logger/src/interfaces"
 	"github.com/Bastien-Antigravity/flexible-logger/src/profiles"
@@ -41,7 +42,7 @@ func main() {
 	// (Deferred instantiation using a channel/func proxy to prevent circular dep)
 	var telemetryCallback func(string)
 	var botInstance *telegram.Bot
-	
+
 	cbs := interfaces.SubscriberCallbacks{
 		OnTelemetry: func(msg string) {
 			if telemetryCallback != nil {

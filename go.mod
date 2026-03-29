@@ -4,6 +4,8 @@ go 1.25.4
 
 require (
 	github.com/Bastien-Antigravity/flexible-logger v1.0.0
+	github.com/Bastien-Antigravity/message-serializers v0.0.0-20260329102954-1326d3334c05
+	github.com/nats-io/nats.go v1.50.0
 	github.com/spf13/viper v1.21.0
 	google.golang.org/grpc v1.79.3
 	google.golang.org/protobuf v1.36.11
@@ -19,7 +21,6 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/klauspost/compress v1.18.5 // indirect
-	github.com/nats-io/nats.go v1.50.0 // indirect
 	github.com/nats-io/nkeys v0.4.15 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
