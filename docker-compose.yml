@@ -1,20 +1,18 @@
 services:
+  # --- Infrastructure ---
   tele-remote:
-    build: .
-    image: tele-remote:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghcr.io/bastien-antigravity/tele-remote:${TAG:-latest}
     container_name: tele-remote
     restart: unless-stopped
     ports:
-      - "50051:50051"
-    environment:
-      # Pass host OS environment variables into the container
-      - TELEREMOTE_TB_TOKEN
-      - TELEREMOTE_TB_CHATID
-      - TELEREMOTE_TB_IP
-      - TELEREMOTE_TB_PORT
-      - TELEREMOTE_LOG_LEVEL
-      - TELEREMOTE_NATS_SERVERS
+      - "127.0.0.2:${TR_PORT:-1863}:${TR_PORT:-1863}"
+    networks:
+      - teleremote_network
+    labels: [ com.centurylinklabs.watchtower.enable=true ]
+
 networks:
-  default:
-    name: teleremote_network
+  teleremote_network:
     external: true
