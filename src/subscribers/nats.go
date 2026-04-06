@@ -9,7 +9,7 @@ import (
 	"tele-remote/src/interfaces"
 	"tele-remote/src/publishers"
 
-	flexlogger "github.com/Bastien-Antigravity/flexible-logger/src/interfaces"
+	unilogger "github.com/Bastien-Antigravity/universal-logger/src/logger"
 	msg_serializers "github.com/Bastien-Antigravity/message-serializers/src/serializers"
 	"github.com/nats-io/nats.go"
 )
@@ -17,12 +17,12 @@ import (
 // NatsSubscriber connects to a NATS cluster and listens for Component messages
 type NatsSubscriber struct {
 	cfg *config.Config
-	log flexlogger.Logger
+	log *unilogger.UniLog
 	nc  *nats.Conn
 	sub *nats.Subscription
 }
 
-func NewNatsSubscriber(c *config.Config, l flexlogger.Logger) interfaces.Subscriber {
+func NewNatsSubscriber(c *config.Config, l *unilogger.UniLog) interfaces.Subscriber {
 	return &NatsSubscriber{cfg: c, log: l}
 }
 

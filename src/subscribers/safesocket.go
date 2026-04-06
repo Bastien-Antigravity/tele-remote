@@ -6,16 +6,16 @@ import (
 	"tele-remote/src/config"
 	"tele-remote/src/interfaces"
 
-	flexlogger "github.com/Bastien-Antigravity/flexible-logger/src/interfaces"
+	unilogger "github.com/Bastien-Antigravity/universal-logger/src/logger"
 )
 
 // SafeSocketSubscriber abstracts a safe-socket TCP/Unix listener for Component payloads
 type SafeSocketSubscriber struct {
 	cfg *config.Config
-	log flexlogger.Logger
+	log *unilogger.UniLog
 }
 
-func NewSafeSocketSubscriber(c *config.Config, l flexlogger.Logger) interfaces.Subscriber {
+func NewSafeSocketSubscriber(c *config.Config, l *unilogger.UniLog) interfaces.Subscriber {
 	return &SafeSocketSubscriber{cfg: c, log: l}
 }
 

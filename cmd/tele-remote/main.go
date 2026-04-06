@@ -12,8 +12,8 @@ import (
 	"tele-remote/src/subscribers"
 	"tele-remote/src/telegram"
 
-	flexlogger "github.com/Bastien-Antigravity/flexible-logger/src/interfaces"
-	"github.com/Bastien-Antigravity/flexible-logger/src/profiles"
+	"github.com/Bastien-Antigravity/universal-logger/src/bootstrap"
+	"github.com/Bastien-Antigravity/universal-logger/src/utils"
 )
 
 // -----------------------------------------------------------------------------
@@ -25,13 +25,17 @@ func main() {
 		panic(err)
 	}
 
-	// 2. Setup flexible-logger
-	var appLogger flexlogger.Logger
+	var loggerProfile string
+	var logLevel utils.Level
 	if cfg.LogLevel == "DEBUG" {
-		appLogger = profiles.NewDevelLogger("TeleRemote")
+		loggerProfile = "devel"
+		logLevel = utils.LevelDebug
 	} else {
-		appLogger = profiles.NewMinimalLogger("TeleRemote")
+		loggerProfile = "minimal"
+		logLevel = utils.LevelInfo
 	}
+
+	_, appLogger := bootstrap.Init("TeleRemote", "standalone", loggerProfile, logLevel, false)
 
 	appLogger.Info("Bootstrapping TeleRemote Service...")
 
