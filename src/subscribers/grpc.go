@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net"
 
-	flexlogger "github.com/Bastien-Antigravity/flexible-logger/src/interfaces"
+	unilogger "github.com/Bastien-Antigravity/universal-logger/src/logger"
 	"google.golang.org/grpc"
 
 	"tele-remote/src/grpc_control"
@@ -16,14 +16,14 @@ import (
 // GrpcSubscriber acts as the Tele-Remote generic gRPC Listener
 type GrpcSubscriber struct {
 	grpc_control.UnimplementedTeleRemoteServiceServer
-	log      flexlogger.Logger
+	log      *unilogger.UniLog
 	bindIP   string
 	bindPort int
 	cbs      interfaces.SubscriberCallbacks
 	grpcSrv  *grpc.Server
 }
 
-func NewGrpcSubscriber(l flexlogger.Logger, ip string, port int) interfaces.Subscriber {
+func NewGrpcSubscriber(l *unilogger.UniLog, ip string, port int) interfaces.Subscriber {
 	return &GrpcSubscriber{
 		log:      l,
 		bindIP:   ip,

@@ -9,7 +9,7 @@ import (
 	"tele-remote/src/config"
 	"tele-remote/src/interfaces"
 
-	flexlogger "github.com/Bastien-Antigravity/flexible-logger/src/interfaces"
+	unilogger "github.com/Bastien-Antigravity/universal-logger/src/logger"
 	tb "gopkg.in/telebot.v3"
 )
 
@@ -18,7 +18,7 @@ import (
 // Bot holds the telegram connection, config, and state references
 type Bot struct {
 	b       *tb.Bot
-	log     flexlogger.Logger
+	log     *unilogger.UniLog
 	cfg     *config.Config
 
 	Menus map[string]*CommandMenu
@@ -33,7 +33,7 @@ type Bot struct {
 // -----------------------------------------------------------------------------
 
 // NewBot registers Telebot settings and initializes memory maps
-func NewBot(cfg *config.Config, log flexlogger.Logger) (*Bot, error) {
+func NewBot(cfg *config.Config, log *unilogger.UniLog) (*Bot, error) {
 	pref := tb.Settings{
 		Token:  cfg.TelegramToken,
 		Poller: &tb.LongPoller{Timeout: 10 * time.Second},
