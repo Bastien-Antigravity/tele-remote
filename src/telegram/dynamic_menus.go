@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"tele-remote/src/interfaces"
+	"github.com/Bastien-Antigravity/tele-remote/src/interfaces"
 
 	tb "gopkg.in/telebot.v3"
 )

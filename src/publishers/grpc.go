@@ -3,8 +3,8 @@ package publishers
 import (
 	"context"
 
-	"tele-remote/src/grpc_control"
-	"tele-remote/src/interfaces"
+	"github.com/Bastien-Antigravity/tele-remote/src/grpc_control"
+	"github.com/Bastien-Antigravity/tele-remote/src/interfaces"
 )
 
 // GrpcPublisher wraps a bidirectional gRPC stream and implements interfaces.Publisher

@@ -3,7 +3,7 @@ package publishers
 import (
 	"context"
 
-	"tele-remote/src/interfaces"
+	"github.com/Bastien-Antigravity/tele-remote/src/interfaces"
 	msg_interfaces "github.com/Bastien-Antigravity/message-serializers/src/interfaces"
 )
 

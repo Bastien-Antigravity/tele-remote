@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"tele-remote/src/config"
-	"tele-remote/src/interfaces"
+	"github.com/Bastien-Antigravity/tele-remote/src/config"
+	"github.com/Bastien-Antigravity/tele-remote/src/interfaces"
 
 	unilogger "github.com/Bastien-Antigravity/universal-logger/src/logger"
 	tb "gopkg.in/telebot.v3"

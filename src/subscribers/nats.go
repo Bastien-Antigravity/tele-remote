@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"tele-remote/src/config"
-	"tele-remote/src/interfaces"
-	"tele-remote/src/publishers"
+	"github.com/Bastien-Antigravity/tele-remote/src/config"
+	"github.com/Bastien-Antigravity/tele-remote/src/interfaces"
+	"github.com/Bastien-Antigravity/tele-remote/src/publishers"
 
 	unilogger "github.com/Bastien-Antigravity/universal-logger/src/logger"
 	msg_serializers "github.com/Bastien-Antigravity/message-serializers/src/serializers"

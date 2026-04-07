@@ -8,9 +8,9 @@ import (
 	unilogger "github.com/Bastien-Antigravity/universal-logger/src/logger"
 	"google.golang.org/grpc"
 
-	"tele-remote/src/grpc_control"
-	"tele-remote/src/interfaces"
-	"tele-remote/src/publishers"
+	"github.com/Bastien-Antigravity/tele-remote/src/grpc_control"
+	"github.com/Bastien-Antigravity/tele-remote/src/interfaces"
+	"github.com/Bastien-Antigravity/tele-remote/src/publishers"
 )
 
 // GrpcSubscriber acts as the Tele-Remote generic gRPC Listener

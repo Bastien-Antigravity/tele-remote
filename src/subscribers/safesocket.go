@@ -3,8 +3,8 @@ package subscribers
 import (
 	"context"
 
-	"tele-remote/src/config"
-	"tele-remote/src/interfaces"
+	"github.com/Bastien-Antigravity/tele-remote/src/config"
+	"github.com/Bastien-Antigravity/tele-remote/src/interfaces"
 
 	unilogger "github.com/Bastien-Antigravity/universal-logger/src/logger"
 )

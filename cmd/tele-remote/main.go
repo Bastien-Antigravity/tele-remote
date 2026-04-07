@@ -7,10 +7,10 @@ import (
 	"syscall"
 	"time"
 
-	"tele-remote/src/config"
-	"tele-remote/src/interfaces"
-	"tele-remote/src/subscribers"
-	"tele-remote/src/telegram"
+	"github.com/Bastien-Antigravity/tele-remote/src/config"
+	"github.com/Bastien-Antigravity/tele-remote/src/interfaces"
+	"github.com/Bastien-Antigravity/tele-remote/src/subscribers"
+	"github.com/Bastien-Antigravity/tele-remote/src/telegram"
 
 	"github.com/Bastien-Antigravity/universal-logger/src/bootstrap"
 	"github.com/Bastien-Antigravity/universal-logger/src/utils"
