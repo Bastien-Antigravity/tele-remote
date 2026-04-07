@@ -58,8 +58,8 @@ cloud.google.com/go/storage v1.14.0/go.mod h1:GrKmX003DSIwi9o29oFT7YDnHYwZoctc3f
 dmitri.shuralyov.com/gpu/mtl v0.0.0-20190408044501-666a987793e9/go.mod h1:H6x//7gZCb22OMCxBHrMx7a5I7Hp++hsVxbQ4BYO7hU=
 github.com/Bastien-Antigravity/distributed-config v1.0.1 h1:8Ns5q43uCe12YMHjtff6alYMLF8ksYi80Y6ND7Oz3I8=
 github.com/Bastien-Antigravity/distributed-config v1.0.1/go.mod h1:v7zRX8fH5Y8nkhneqncZYTvTmdYjbvoiyu3iY5EMSm0=
-github.com/Bastien-Antigravity/flexible-logger v1.0.1 h1:HGp9N6T81UNGd4VOUIKsV5qzuL2xX3l+ll2vpeX8GQw=
-github.com/Bastien-Antigravity/flexible-logger v1.0.1/go.mod h1:KyE7hb5K2VFEYc5YZ8mPV1EazjhOOVcptygvlDJ8/ds=
+github.com/Bastien-Antigravity/flexible-logger v1.0.2 h1:szXvPIXlQQ4LmNoWns4/Lmd4cpVpHXe5u28Byk6a1CQ=
+github.com/Bastien-Antigravity/flexible-logger v1.0.2/go.mod h1:KyE7hb5K2VFEYc5YZ8mPV1EazjhOOVcptygvlDJ8/ds=
 github.com/Bastien-Antigravity/message-serializers v1.0.1 h1:0Qiegs2q1VAwoTZrtfXIF+udFQ/uxDvXfmny6sjBMHw=
 github.com/Bastien-Antigravity/message-serializers v1.0.1/go.mod h1:vYZ6R+qMSOdGwxlFGEssxME5zuaMPLqrPCQdah4JRPg=
 github.com/Bastien-Antigravity/safe-socket v1.3.0 h1:rbi+Lk07d8iOwkNglw12Y4rrxt5VmwtgqPDrpkk1/5I=
