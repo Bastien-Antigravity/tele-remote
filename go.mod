@@ -4,7 +4,7 @@ go 1.25.4
 
 require (
 	github.com/Bastien-Antigravity/message-serializers v1.0.1
-	github.com/Bastien-Antigravity/universal-logger v1.0.2
+	github.com/Bastien-Antigravity/universal-logger v1.0.4
 	github.com/nats-io/nats.go v1.50.0
 	github.com/spf13/viper v1.21.0
 	google.golang.org/grpc v1.79.3
@@ -14,7 +14,7 @@ require (
 
 require (
 	github.com/Bastien-Antigravity/distributed-config v1.5.0 // indirect
-	github.com/Bastien-Antigravity/flexible-logger v1.0.2 // indirect
+	github.com/Bastien-Antigravity/flexible-logger v1.0.4 // indirect
 )
 
 require (
