@@ -4,7 +4,7 @@ go 1.25.4
 
 require (
 	github.com/Bastien-Antigravity/message-serializers v1.0.1
-	github.com/Bastien-Antigravity/universal-logger v1.0.6
+	github.com/Bastien-Antigravity/universal-logger v1.0.7
 	github.com/nats-io/nats.go v1.50.0
 	github.com/spf13/viper v1.21.0
 	google.golang.org/grpc v1.79.3
@@ -13,13 +13,13 @@ require (
 )
 
 require (
-	github.com/Bastien-Antigravity/distributed-config v1.5.2 // indirect
-	github.com/Bastien-Antigravity/flexible-logger v1.0.6 // indirect
+	github.com/Bastien-Antigravity/distributed-config v1.5.3 // indirect
+	github.com/Bastien-Antigravity/flexible-logger v1.0.7 // indirect
 )
 
 require (
 	capnproto.org/go/capnp/v3 v3.1.0-alpha.2 // indirect
-	github.com/Bastien-Antigravity/safe-socket v1.5.0 // indirect
+	github.com/Bastien-Antigravity/safe-socket v1.6.0 // indirect
 	github.com/colega/zeropool v0.0.0-20230505084239-6fb4a4f75381 // indirect
 	github.com/edsrzf/mmap-go v1.2.0 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
