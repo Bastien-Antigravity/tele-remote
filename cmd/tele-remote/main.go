@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/Bastien-Antigravity/tele-remote/src/config"
@@ -12,6 +10,8 @@ import (
 	"github.com/Bastien-Antigravity/tele-remote/src/subscribers"
 	"github.com/Bastien-Antigravity/tele-remote/src/telegram"
 
+	"github.com/Bastien-Antigravity/microservice-toolbox/go/pkg/connectivity"
+	"github.com/Bastien-Antigravity/microservice-toolbox/go/pkg/lifecycle"
 	"github.com/Bastien-Antigravity/universal-logger/src/bootstrap"
 	"github.com/Bastien-Antigravity/universal-logger/src/utils"
 )
@@ -24,6 +24,10 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
+	// Dynamic IP Resolution via Toolbox
+	resolver := connectivity.NewResolver()
+	cfg.BindIP, _ = resolver.ResolveBindAddr(cfg.BindIP)
 
 	var loggerProfile string
 	var logLevel utils.Level
@@ -104,15 +108,17 @@ func main() {
 		bot.Start(ctx)
 	}()
 
-	// 5. Block until graceful shutdown via signals
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+	// 5. Block until graceful shutdown via Toolbox
+	lm := lifecycle.NewManager()
+	lm.Register("AppCancel", func() error {
+		cancel()
+		return nil
+	})
+	
+	lm.Register("FinalWait", func() error {
+		time.Sleep(1 * time.Second)
+		return nil
+	})
 
-	s := <-sigCh
-	appLogger.Info("Received signal, initiating graceful shutdown", "signal", s)
-	cancel()
-
-	// Wait a moment for grpc and bot components to cleanly stop
-	time.Sleep(2 * time.Second)
-	appLogger.Info("Shutdown complete.")
+	lm.Wait(context.Background())
 }

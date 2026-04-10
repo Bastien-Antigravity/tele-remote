@@ -3,7 +3,7 @@ module github.com/Bastien-Antigravity/tele-remote
 go 1.25.4
 
 require (
-	github.com/Bastien-Antigravity/message-serializers v1.0.1
+	github.com/Bastien-Antigravity/microservice-toolbox/go v0.0.0-00010101000000-000000000000
 	github.com/Bastien-Antigravity/universal-logger v1.1.5
 	github.com/nats-io/nats.go v1.50.0
 	github.com/spf13/viper v1.21.0
@@ -43,3 +43,5 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260319201613-d00831a3d3e7 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/Bastien-Antigravity/microservice-toolbox/go => ../microservice-toolbox/go

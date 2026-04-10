@@ -3,16 +3,16 @@ package publishers
 import (
 	"context"
 
+	"github.com/Bastien-Antigravity/microservice-toolbox/go/pkg/serializers"
 	"github.com/Bastien-Antigravity/tele-remote/src/interfaces"
-	msg_interfaces "github.com/Bastien-Antigravity/message-serializers/src/interfaces"
 )
 
 // SafeSocketPublisher defines the contract for sending commands over the safe-socket library
 type SafeSocketPublisher struct {
-	serializer msg_interfaces.ISerializer
+	serializer serializers.Serializer
 }
 
-func NewSafeSocketPublisher(ser msg_interfaces.ISerializer) interfaces.Publisher {
+func NewSafeSocketPublisher(ser serializers.Serializer) interfaces.Publisher {
 	return &SafeSocketPublisher{serializer: ser}
 }
 
