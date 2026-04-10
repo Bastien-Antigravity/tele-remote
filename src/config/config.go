@@ -53,5 +53,10 @@ func LoadConfig() (*Config, error) {
 		return nil, fmt.Errorf("unable to decode into config struct, %v", err)
 	}
 
+	// Clean potential quotes from string fields
+	cfg.TelegramToken = strings.Trim(cfg.TelegramToken, "\"")
+	cfg.ChatID = strings.Trim(cfg.ChatID, "\"")
+	cfg.BindIP = strings.Trim(cfg.BindIP, "\"")
+
 	return &cfg, nil
 }
