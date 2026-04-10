@@ -4,22 +4,22 @@ import (
 	"context"
 
 	"github.com/Bastien-Antigravity/tele-remote/src/config"
-	"github.com/Bastien-Antigravity/tele-remote/src/interfaces"
+	tele_interfaces "github.com/Bastien-Antigravity/tele-remote/src/interfaces"
 
-	unilogger "github.com/Bastien-Antigravity/universal-logger/src/logger"
+	"github.com/Bastien-Antigravity/universal-logger/src/interfaces"
 )
 
 // SafeSocketSubscriber abstracts a safe-socket TCP/Unix listener for Component payloads
 type SafeSocketSubscriber struct {
 	cfg *config.Config
-	log *unilogger.UniLog
+	log interfaces.Logger
 }
 
-func NewSafeSocketSubscriber(c *config.Config, l *unilogger.UniLog) interfaces.Subscriber {
+func NewSafeSocketSubscriber(c *config.Config, l interfaces.Logger) tele_interfaces.Subscriber {
 	return &SafeSocketSubscriber{cfg: c, log: l}
 }
 
-func (s *SafeSocketSubscriber) StartListen(ctx context.Context, cbs interfaces.SubscriberCallbacks) error {
+func (s *SafeSocketSubscriber) StartListen(ctx context.Context, cbs tele_interfaces.SubscriberCallbacks) error {
 	s.log.Info("SafeSocket Subscriber initialized (Skeleton)")
 
 	go func() {

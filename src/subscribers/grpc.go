@@ -5,25 +5,25 @@ import (
 	"fmt"
 	"net"
 
-	unilogger "github.com/Bastien-Antigravity/universal-logger/src/logger"
+	"github.com/Bastien-Antigravity/universal-logger/src/interfaces"
 	"google.golang.org/grpc"
 
 	"github.com/Bastien-Antigravity/tele-remote/src/grpc_control"
-	"github.com/Bastien-Antigravity/tele-remote/src/interfaces"
+	tele_interfaces "github.com/Bastien-Antigravity/tele-remote/src/interfaces"
 	"github.com/Bastien-Antigravity/tele-remote/src/publishers"
 )
 
 // GrpcSubscriber acts as the Tele-Remote generic gRPC Listener
 type GrpcSubscriber struct {
 	grpc_control.UnimplementedTeleRemoteServiceServer
-	log      *unilogger.UniLog
+	log      interfaces.Logger
 	bindIP   string
 	bindPort int
-	cbs      interfaces.SubscriberCallbacks
+	cbs      tele_interfaces.SubscriberCallbacks
 	grpcSrv  *grpc.Server
 }
 
-func NewGrpcSubscriber(l *unilogger.UniLog, ip string, port int) interfaces.Subscriber {
+func NewGrpcSubscriber(l interfaces.Logger, ip string, port int) tele_interfaces.Subscriber {
 	return &GrpcSubscriber{
 		log:      l,
 		bindIP:   ip,
@@ -31,7 +31,7 @@ func NewGrpcSubscriber(l *unilogger.UniLog, ip string, port int) interfaces.Subs
 	}
 }
 
-func (s *GrpcSubscriber) StartListen(ctx context.Context, cbs interfaces.SubscriberCallbacks) error {
+func (s *GrpcSubscriber) StartListen(ctx context.Context, cbs tele_interfaces.SubscriberCallbacks) error {
 	s.cbs = cbs
 	addr := fmt.Sprintf("%s:%d", s.bindIP, s.bindPort)
 	lis, err := net.Listen("tcp", addr)

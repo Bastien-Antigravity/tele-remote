@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/Bastien-Antigravity/tele-remote/src/config"
-	"github.com/Bastien-Antigravity/tele-remote/src/interfaces"
+	tele_interfaces "github.com/Bastien-Antigravity/tele-remote/src/interfaces"
 
-	unilogger "github.com/Bastien-Antigravity/universal-logger/src/logger"
+	"github.com/Bastien-Antigravity/universal-logger/src/interfaces"
 	tb "gopkg.in/telebot.v3"
 )
 
@@ -18,7 +18,7 @@ import (
 // Bot holds the telegram connection, config, and state references
 type Bot struct {
 	b       *tb.Bot
-	log     *unilogger.UniLog
+	log     interfaces.Logger
 	cfg     *config.Config
 
 	Menus map[string]*CommandMenu
@@ -27,13 +27,13 @@ type Bot struct {
 	dynamicMenus map[string]*ComponentMenu
 	actionMap    map[string]CallbackAction
 	cbCounter    int
-	publishers   map[string]interfaces.Publisher
+	publishers   map[string]tele_interfaces.Publisher
 }
 
 // -----------------------------------------------------------------------------
 
 // NewBot registers Telebot settings and initializes memory maps
-func NewBot(cfg *config.Config, log *unilogger.UniLog) (*Bot, error) {
+func NewBot(cfg *config.Config, log interfaces.Logger) (*Bot, error) {
 	pref := tb.Settings{
 		Token:  cfg.TelegramToken,
 		Poller: &tb.LongPoller{Timeout: 10 * time.Second},
@@ -51,7 +51,7 @@ func NewBot(cfg *config.Config, log *unilogger.UniLog) (*Bot, error) {
 		Menus:        make(map[string]*CommandMenu),
 		dynamicMenus: make(map[string]*ComponentMenu),
 		actionMap:    make(map[string]CallbackAction),
-		publishers:   make(map[string]interfaces.Publisher),
+		publishers:   make(map[string]tele_interfaces.Publisher),
 	}, nil
 }
 
