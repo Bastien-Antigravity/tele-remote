@@ -14,7 +14,7 @@ require (
 
 require (
 	github.com/Bastien-Antigravity/distributed-config v1.5.3 // indirect
-	github.com/Bastien-Antigravity/flexible-logger v1.0.7 // indirect
+	github.com/Bastien-Antigravity/flexible-logger v1.0.9 // indirect
 )
 
 require (
