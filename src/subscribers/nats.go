@@ -10,7 +10,7 @@ import (
 	"github.com/Bastien-Antigravity/tele-remote/src/publishers"
 
 	universal_interfaces "github.com/Bastien-Antigravity/universal-logger/src/interfaces"
-	"github.com/Bastien-Antigravity/microservice-toolbox/go/pkg/serializers"
+	msg_serializers "github.com/Bastien-Antigravity/message-serializers/src/serializers"
 	"github.com/nats-io/nats.go"
 )
 
@@ -39,7 +39,7 @@ func (s *NatsSubscriber) StartListen(ctx context.Context, cbs interfaces.Subscri
 	s.nc = nc
 
 	// Use the shared JSON serializer
-	ser := serializers.NewJSONSerializer()
+	ser := msg_serializers.NewJSONSerializer()
 
 	s.log.Info("Starting NATS Subscriber", "subject", s.cfg.Nats.SubjectPrefix+".>")
 
