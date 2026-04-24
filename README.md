@@ -66,4 +66,4 @@ When the user sends `/start` to the Bot, it replies with an interactive keyboard
 
 ## Documentation
 For a detailed diagram and resume of the data flow, please see:
-- [doc/doc.doc](file:///Users/imac/Desktop/tele-remote/doc/doc.doc)
+- [doc/doc.doc](doc/doc.doc)
