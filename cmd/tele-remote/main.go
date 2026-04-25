@@ -7,35 +7,33 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Bastien-Antigravity/tele-remote/src/config"
-	"github.com/Bastien-Antigravity/tele-remote/src/interfaces"
+	tele_config "github.com/Bastien-Antigravity/tele-remote/src/config"
+	tele_ifaces "github.com/Bastien-Antigravity/tele-remote/src/interfaces"
 	"github.com/Bastien-Antigravity/tele-remote/src/subscribers"
 	"github.com/Bastien-Antigravity/tele-remote/src/telegram"
 
-	"github.com/Bastien-Antigravity/universal-logger/src/bootstrap"
-	"github.com/Bastien-Antigravity/universal-logger/src/utils"
+	unilog "github.com/Bastien-Antigravity/universal-logger/src/bootstrap"
 )
 
 // -----------------------------------------------------------------------------
 // main is the entry point orchestrating configurations, gRPC, and Telegram bots
 func main() {
 	// 1. Initialize Settings
-	cfg, err := config.LoadConfig()
+	cfg, err := tele_config.LoadConfig()
 	if err != nil {
 		panic(err)
 	}
 
 	var loggerProfile string
-	var logLevel utils.Level
+	var logLevelStr string
 	if cfg.LogLevel == "DEBUG" {
 		loggerProfile = "devel"
-		logLevel = utils.LevelDebug
+		logLevelStr = "DEBUG"
 	} else {
 		loggerProfile = "minimal"
-		logLevel = utils.LevelInfo
+		logLevelStr = "INFO"
 	}
-
-	_, appLogger := bootstrap.Init("TeleRemote", "standalone", loggerProfile, logLevel, false)
+	_, appLogger := unilog.Init("TeleRemote", "standalone", loggerProfile, logLevelStr, false, nil)
 
 	appLogger.Info("Bootstrapping TeleRemote Service...")
 
@@ -47,7 +45,7 @@ func main() {
 	var telemetryCallback func(string)
 	var botInstance *telegram.Bot
 
-	cbs := interfaces.SubscriberCallbacks{
+	cbs := tele_ifaces.SubscriberCallbacks{
 		OnTelemetry: func(msg string) {
 			if telemetryCallback != nil {
 				telemetryCallback(msg)
