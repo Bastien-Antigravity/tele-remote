@@ -6,18 +6,10 @@ import (
 	"fmt"
 
 	"github.com/Bastien-Antigravity/tele-remote/src/interfaces"
+	"github.com/Bastien-Antigravity/tele-remote/src/models"
 
 	tb "gopkg.in/telebot.v3"
 )
-
-// -----------------------------------------------------------------------------
-
-// ComponentMenu holds the structured tree for a single registered component
-type ComponentMenu struct {
-	Name     string
-	ClientID string
-	Root     *CommandMenu
-}
 
 // -----------------------------------------------------------------------------
 
@@ -37,9 +29,9 @@ func (bot *Bot) OnComponentConnected(clientID, componentName, menuJSON string, p
 		return
 	}
 
-	root := &CommandMenu{
+	root := &models.CommandMenu{
 		Title: fmt.Sprintf("📦 %s", componentName),
-		Rows:  []CommandRow{},
+		Rows:  []models.CommandRow{},
 	}
 
 	for _, item := range rawItems {
@@ -50,12 +42,17 @@ func (bot *Bot) OnComponentConnected(clientID, componentName, menuJSON string, p
 	}
 
 	bot.mu.Lock()
-	bot.dynamicMenus[clientID] = &ComponentMenu{
+	bot.dynamicMenus[clientID] = &models.ComponentMenu{
 		Name:     componentName,
 		ClientID: clientID,
 		Root:     root,
 	}
 	bot.mu.Unlock()
+
+	// Persistence: Save state after each successful registration
+	if err := bot.SaveState(); err != nil {
+		bot.log.Warning("Failed to save component state", "err", err)
+	}
 
 	bot.log.Info("Dynamic menu registered", "client", clientID, "rows", len(root.Rows))
 }
@@ -74,8 +71,8 @@ func (bot *Bot) OnComponentDisconnected(clientID string) {
 
 // -----------------------------------------------------------------------------
 
-func (bot *Bot) parseMenuRow(data map[string]interface{}, clientID string) CommandRow {
-	row := CommandRow{Buttons: []CommandButton{}}
+func (bot *Bot) parseMenuRow(data map[string]interface{}, clientID string) models.CommandRow {
+	row := models.CommandRow{Buttons: []models.CommandButton{}}
 
 	// If it's a list (row), iterate
 	if btns, ok := data["buttons"].([]interface{}); ok {
@@ -94,18 +91,18 @@ func (bot *Bot) parseMenuRow(data map[string]interface{}, clientID string) Comma
 
 // -----------------------------------------------------------------------------
 
-func (bot *Bot) parseButton(data map[string]interface{}, clientID string) CommandButton {
+func (bot *Bot) parseButton(data map[string]interface{}, clientID string) models.CommandButton {
 	label := data["label"].(string)
 
 	// If it has sub-buttons, it's a sub-menu
 	if sub, ok := data["menu"].([]interface{}); ok {
-		subMenu := &CommandMenu{Title: label, Rows: []CommandRow{}}
+		subMenu := &models.CommandMenu{Title: label, Rows: []models.CommandRow{}}
 		for _, s := range sub {
 			if sMap, ok := s.(map[string]interface{}); ok {
 				subMenu.Rows = append(subMenu.Rows, bot.parseMenuRow(sMap, clientID))
 			}
 		}
-		return CommandButton{Label: label, NextMenu: subMenu}
+		return models.CommandButton{Label: label, NextMenu: subMenu}
 	}
 
 	// Otherwise, it's a command
@@ -134,12 +131,12 @@ func (bot *Bot) parseButton(data map[string]interface{}, clientID string) Comman
 		return ctx.Send(fmt.Sprintf("✅ Sent: %s", label))
 	})
 
-	return CommandButton{Label: label, CallbackData: uniqueID}
+	return models.CommandButton{Label: label, CallbackData: uniqueID}
 }
 
 // -----------------------------------------------------------------------------
 
-func (bot *Bot) registerAction(fn CallbackAction) string {
+func (bot *Bot) registerAction(fn models.CallbackAction) string {
 	bot.mu.Lock()
 	defer bot.mu.Unlock()
 	bot.cbCounter++
@@ -193,7 +190,7 @@ func (bot *Bot) handleDynamicCallback(c tb.Context) error {
 // -----------------------------------------------------------------------------
 
 // renderMenu recursively builds and displays a CommandMenu
-func (bot *Bot) renderMenu(c tb.Context, m *CommandMenu) error {
+func (bot *Bot) renderMenu(c tb.Context, m *models.CommandMenu) error {
 	menuMarkup := &tb.ReplyMarkup{}
 	var rows []tb.Row
 

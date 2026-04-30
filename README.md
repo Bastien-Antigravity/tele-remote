@@ -50,14 +50,6 @@ go build ./cmd/tele-remote/...
 ./tele-remote
 ```
 
-### Python Service (Legacy)
-
-The original Python implementation using raw TCP sockets is located in `legacy-py/`.
-
-```bash
-python3 legacy-py/tele_remote.py --name "tele_remote" --log_level 10
-```
-
 ## Available Telegram Commands
 When the user sends `/start` to the Bot, it replies with an interactive keyboard:
 * **🆘 power off !** : Gracefully signals all components to power off.

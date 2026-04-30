@@ -1,0 +1,22 @@
+common:
+    name: tele_remote
+    reset: false
+capabilities:
+    tele_remote:
+        ip: ${TR_IP:127.0.0.1}
+        port: ${TR_PORT:50051}
+        token: ${TR_TOKEN}
+        chat_id: ${TR_CHATID}
+        url: ${TR_URL:https://api.telegram.org}
+    nats:
+        servers: ["nats://127.0.0.1:4222"]
+        client_id: "tele_remote"
+        subject_prefix: "tr"
+    safesocket:
+        port: ${SS_PORT:6000}
+    log_server:
+        ip: ${LS_IP:127.0.0.1}
+        port: ${LS_PORT:9020}
+    config_server:
+        ip: ${CF_IP:127.0.0.1}
+        port: ${CF_PORT:3306}

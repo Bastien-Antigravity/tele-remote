@@ -1,0 +1,10 @@
+common:
+    name: tele_remote_test
+    reset: true
+capabilities:
+    tele_remote:
+        ip: 127.0.0.1
+        port: 0 # Random port for testing
+        token: "12345:TEST_TOKEN"
+        chat_id: "12345678"
+        url: "http://localhost:8080" # Mock server will override this
