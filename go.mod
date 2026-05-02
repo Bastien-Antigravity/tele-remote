@@ -3,18 +3,17 @@ module github.com/Bastien-Antigravity/tele-remote
 go 1.25.4
 
 require (
-	github.com/Bastien-Antigravity/message-serializers v1.0.1
-	github.com/Bastien-Antigravity/microservice-toolbox/go v1.1.7
-	github.com/Bastien-Antigravity/universal-logger v1.4.0
-	github.com/nats-io/nats.go v1.50.0
+	github.com/Bastien-Antigravity/microservice-toolbox/go v1.2.2
+	github.com/Bastien-Antigravity/universal-logger v1.4.2
+	github.com/nats-io/nats.go v1.51.0
 	google.golang.org/grpc v1.80.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/telebot.v3 v3.3.8
 )
 
 require (
-	github.com/Bastien-Antigravity/distributed-config v1.9.0 // indirect
-	github.com/Bastien-Antigravity/flexible-logger v1.3.0 // indirect
+	github.com/Bastien-Antigravity/distributed-config v1.9.922 // indirect
+	github.com/Bastien-Antigravity/flexible-logger v1.3.3 // indirect
 )
 
 require (
