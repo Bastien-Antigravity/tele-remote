@@ -1,3 +1,9 @@
+---
+microservice: tele-remote
+type: governance
+status: active
+---
+
 # ⚡ AI Initialization: tele-remote
 
 > [!IMPORTANT] MANDATORY INITIALIZATION
