@@ -21,13 +21,8 @@ import (
 // -----------------------------------------------------------------------------
 
 func main() {
-	// 1. Initialize Configuration via Toolbox
-	profile := os.Getenv("TR_PROFILE")
-	if profile == "" {
-		profile = "standalone"
-	}
-
-	cfg, err := config.LoadConfig(profile)
+	// 1. Initialize Configuration via Toolbox (handles --profile automatically)
+	cfg, err := config.LoadConfig("standalone")
 	if err != nil {
 		fmt.Printf("Critical Error loading config: %v\n", err)
 		os.Exit(1)
@@ -36,12 +31,12 @@ func main() {
 	// -----------------------------------------------------------------------------
 
 	// 2. Initialize Logger (Standardized Bootstrap)
-	_, log := unilog.Init("tele-remote", profile, "no_lock", "INFO", false, &unilog_config.DistConfig{Config: cfg.Config})
+	_, log := unilog.Init("tele-remote", cfg.AppConfig.Profile, "no_lock", "INFO", false, &unilog_config.DistConfig{Config: cfg.Config})
 	defer log.Close()
 
 	// Inject logger into Config for toolbox internal logs
 	cfg.AppConfig.Logger = log
-	log.Info("Tele-Remote starting with profile: %s", profile)
+	log.Info("Tele-Remote starting with profile: %s", cfg.AppConfig.Profile)
 
 	// -----------------------------------------------------------------------------
 
