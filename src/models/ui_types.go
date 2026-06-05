@@ -6,9 +6,9 @@ import tb "gopkg.in/telebot.v3"
 
 // ComponentMenu holds the structured tree for a single registered component
 type ComponentMenu struct {
-	Name     string
-	ClientID string
-	Root     *CommandMenu
+	Name     string `json:"name"`
+	ClientID string `json:"client_id"`
+	Root     *CommandMenu `json:"root"`
 }
 
 // -----------------------------------------------------------------------------
@@ -20,26 +20,27 @@ type CallbackAction func(ctx tb.Context) error
 
 // CommandButton represents a single button in a row
 type CommandButton struct {
-	Label        string
-	CallbackData string       // id in the actionMap
-	NextMenu     *CommandMenu // for sub-menus
+	Label        string       `json:"label"`
+	CallbackData string       `json:"callback_data"` // id in the actionMap
+	NextMenu     *CommandMenu `json:"next_menu"`     // for sub-menus
+	CommandType  int32        `json:"command_type"`  // persisted for logic restore
+	Payload      string       `json:"payload"`       // persisted for logic restore
 }
 
 // -----------------------------------------------------------------------------
 
 // CommandRow represents a single row of buttons in a menu
 type CommandRow struct {
-	Buttons []CommandButton
+	Buttons []CommandButton `json:"buttons"`
 }
 
 // -----------------------------------------------------------------------------
 
 // CommandMenu represents a structured Telegram keyboard mapping
 type CommandMenu struct {
-	Title   string // displayed as header
-	Rows    []CommandRow
-	Caption string
-	Markup  *tb.ReplyMarkup
+	Title   string `json:"title"` // displayed as header
+	Rows    []CommandRow `json:"rows"`
+	Caption string `json:"caption"`
 }
 
 // Standard Command Types

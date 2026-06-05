@@ -32,7 +32,7 @@ type Bot struct {
 	dynamicMenus map[string]*models.ComponentMenu
 	actionMap    map[string]models.CallbackAction
 	cbCounter    int
-	publishers   map[string]tele_interfaces.Publisher
+	publishers   map[string]tele_interfaces.IPublisher
 }
 
 // -----------------------------------------------------------------------------
@@ -60,7 +60,7 @@ func NewBot(cfg *config.Config, log unilog_ifaces.Logger, pm *store.PersistenceM
 		Menus:        make(map[string]*models.CommandMenu),
 		dynamicMenus: make(map[string]*models.ComponentMenu),
 		actionMap:    make(map[string]models.CallbackAction),
-		publishers:   make(map[string]tele_interfaces.Publisher),
+		publishers:   make(map[string]tele_interfaces.IPublisher),
 	}
 
 	// Load initial state if persistence is available
@@ -68,7 +68,10 @@ func NewBot(cfg *config.Config, log unilog_ifaces.Logger, pm *store.PersistenceM
 		if state, err := pm.Load(); err == nil && len(state) > 0 {
 			bot.log.Info("Restoring component registry from persistence", "count", len(state))
 			bot.dynamicMenus = state
-			// Note: We don't restore publishers as they require active network connections
+			// Restore actions for all buttons in the persisted menus
+			for clientID, comp := range state {
+				bot.restoreMenuActions(comp.Root, clientID)
+			}
 		}
 	}
 
@@ -128,7 +131,7 @@ func (bot *Bot) OnDisconnect(clientID string) {
 	bot.mu.Lock()
 	defer bot.mu.Unlock()
 
-	// We keep the menu in persistence as requested, but remove the publisher
+	// We keep the menu in persistence, but remove the publisher
 	if _, ok := bot.dynamicMenus[clientID]; ok {
 		bot.log.Info("Removing publisher for disconnected component (Menu remains)", "client", clientID)
 		delete(bot.publishers, clientID)
@@ -143,4 +146,55 @@ func (bot *Bot) SaveState() error {
 	bot.mu.RLock()
 	defer bot.mu.RUnlock()
 	return bot.pm.Save(bot.dynamicMenus)
+}
+
+// -----------------------------------------------------------------------------
+// Internal Logic
+// -----------------------------------------------------------------------------
+
+// restoreMenuActions recursively re-registers callback actions for restored menus
+func (bot *Bot) restoreMenuActions(m *models.CommandMenu, clientID string) {
+	if m == nil {
+		return
+	}
+	for i := range m.Rows {
+		for j := range m.Rows[i].Buttons {
+			btn := &m.Rows[i].Buttons[j]
+			if btn.NextMenu != nil {
+				bot.restoreMenuActions(btn.NextMenu, clientID)
+			} else if btn.CallbackData != "" {
+				// Re-register the action using the same callback ID
+				bot.registerActionWithID(btn.CallbackData, bot.createCommandAction(clientID, btn.CommandType, btn.Payload, btn.Label))
+			}
+		}
+	}
+}
+
+func (bot *Bot) createCommandAction(clientID string, cmdType int32, payload, label string) models.CallbackAction {
+	return func(ctx tb.Context) error {
+		bot.mu.RLock()
+		pub, ok := bot.publishers[clientID]
+		bot.mu.RUnlock()
+
+		if !ok {
+			return ctx.Send("❌ Component disconnected.")
+		}
+
+		bot.log.Info("Executing component command", "client", clientID, "type", cmdType)
+		
+		// Use a context with timeout for command dispatch
+		dispatchCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		if err := pub.PublishCommand(dispatchCtx, cmdType, payload); err != nil {
+			return ctx.Send(fmt.Sprintf("⚠️ Failed to send command: %v", err))
+		}
+		return ctx.Send(fmt.Sprintf("✅ Sent: %s", label))
+	}
+}
+
+func (bot *Bot) registerActionWithID(id string, fn models.CallbackAction) {
+	bot.mu.Lock()
+	defer bot.mu.Unlock()
+	bot.actionMap[id] = fn
 }

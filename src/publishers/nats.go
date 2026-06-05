@@ -15,7 +15,7 @@ type NatsPublisher struct {
 	serializer msg_interfaces.ISerializer
 }
 
-func NewNatsPublisher(nc *nats.Conn, subject string, ser msg_interfaces.ISerializer) interfaces.Publisher {
+func NewNatsPublisher(nc *nats.Conn, subject string, ser msg_interfaces.ISerializer) interfaces.IPublisher {
 	return &NatsPublisher{nc: nc, subject: subject, serializer: ser}
 }
 

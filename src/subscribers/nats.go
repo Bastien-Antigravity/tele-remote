@@ -22,11 +22,11 @@ type NatsSubscriber struct {
 	sub *nats.Subscription
 }
 
-func NewNatsSubscriber(c *config.Config, l universal_interfaces.Logger) interfaces.Subscriber {
+func NewNatsSubscriber(c *config.Config, l universal_interfaces.Logger) interfaces.ISubscriber {
 	return &NatsSubscriber{cfg: c, log: l}
 }
 
-func (s *NatsSubscriber) StartListen(ctx context.Context, cbs interfaces.SubscriberCallbacks) error {
+func (s *NatsSubscriber) StartListen(ctx context.Context, cbs interfaces.ISubscriberCallbacks) error {
 	if len(s.cfg.Nats.Servers) == 0 {
 		s.log.Warning("NATS disabled: no servers configured")
 		return nil
@@ -91,13 +91,9 @@ func (s *NatsSubscriber) StartListen(ctx context.Context, cbs interfaces.Subscri
 	}
 	s.sub = sub
 
-	// Listen until context cancellation
-	go func() {
-		<-ctx.Done()
-		s.Close()
-	}()
-
-	return nil
+	// Block until context is cancelled
+	<-ctx.Done()
+	return s.Close()
 }
 
 func (s *NatsSubscriber) Close() error {

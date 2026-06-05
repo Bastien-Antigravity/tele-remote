@@ -18,11 +18,6 @@ type NATSConfig struct {
 	SubjectPrefix string   `json:"subject_prefix"`
 }
 
-// SafeSocketConfig matches the SafeSocket setup in the ecosystem
-type SafeSocketConfig struct {
-	Port int `json:"port"`
-}
-
 // TeleRemoteCap matches the specific capability for this service
 type TeleRemoteCap struct {
 	Token  string `json:"token"`
@@ -49,7 +44,6 @@ type Config struct {
 	BindPort      int
 
 	Nats          NATSConfig
-	SafeSocket    SafeSocketConfig
 }
 
 // -----------------------------------------------------------------------------
@@ -90,9 +84,6 @@ func LoadConfig(profile string) (*Config, error) {
 
 	// 2. Extract NATS Settings
 	_ = appConfig.Config.GetCapability("nats", &cfg.Nats)
-
-	// 3. Extract SafeSocket Settings
-	_ = appConfig.Config.GetCapability("safesocket", &cfg.SafeSocket)
 
 	// Clean potential quotes
 	cfg.TelegramToken = strings.Trim(cfg.TelegramToken, "\"")

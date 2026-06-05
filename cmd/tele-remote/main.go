@@ -51,7 +51,7 @@ func main() {
 	}
 
 	// 5. Wrap Bot methods into Subscriber Callbacks
-	botCallbacks := tele_interfaces.SubscriberCallbacks{
+	botCallbacks := tele_interfaces.ISubscriberCallbacks{
 		OnTelemetry:    bot.OnTelemetry,
 		OnRegistration: bot.OnComponentConnected,
 		OnDisconnect:   bot.OnDisconnect,
@@ -75,9 +75,11 @@ func main() {
 	
 	// NATS Subscriber
 	natsSub := subscribers.NewNatsSubscriber(cfg, log)
-	if err := natsSub.StartListen(ctx, botCallbacks); err != nil {
-		log.Error("NATS Subscriber failed to start: %v", err)
-	}
+	go func() {
+		if err := natsSub.StartListen(ctx, botCallbacks); err != nil {
+			log.Error("NATS Subscriber failed to start: %v", err)
+		}
+	}()
 	lm.Register("NATS_Subscriber", natsSub.Close)
 
 	// gRPC Subscriber
@@ -88,13 +90,6 @@ func main() {
 		}
 	}()
 	lm.Register("gRPC_Subscriber", grpcSub.Close)
-
-	// SafeSocket Subscriber (Future)
-	ssSub := subscribers.NewSafeSocketSubscriber(cfg, log)
-	if err := ssSub.StartListen(ctx, botCallbacks); err != nil {
-		log.Error("SafeSocket Subscriber failed: %v", err)
-	}
-	lm.Register("SafeSocket_Subscriber", ssSub.Close)
 
 	// -----------------------------------------------------------------------------
 

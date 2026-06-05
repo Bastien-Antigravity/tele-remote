@@ -1,4 +1,13 @@
-# Tele-Remote
+---
+microservice: obsidian-brain
+type: note
+status: active
+tags:
+- '#service/obsidian-brain'
+- '#type/note'
+- '#state/active'
+- '#zone/3-fleet'
+---# Tele-Remote
 
 Tele-Remote is a central remote control and telemetry bridge that connects a cluster of distributed backend components (like trading bots, worker processes, or microservices) to a centralized Telegram Bot interface. 
 
@@ -8,27 +17,26 @@ It provides an efficient two-way communication channel:
 
 ## Communication Architecture (Pub/Sub)
 
-Tele-Remote uses a transport-agnostic **Publisher/Subscriber** interface model. This allows the system to seamlessly handle multiple connection protocols without changing the Telegram Bot logic:
+Tele-Remote uses a transport-agnostic **IPublisher/ISubscriber** interface model. This allows the system to seamlessly handle multiple connection protocols without changing the Telegram Bot logic:
 
 - **gRPC (Streams):** Modern, high-performance, typed bidirectional streaming.
 - **NATS (Topics):** Distributed messaging using NATS Core or Jetstream.
-- **SafeSocket (TCP/Unix):** Low-overhead, binary-safe socket communication.
 
-Each connection is wrapped as an internal `interfaces.Publisher`, ensuring that commands are routed precisely to the correct client regardless of the protocol.
+Each connection is wrapped as an internal `interfaces.IPublisher`, ensuring that commands are routed precisely to the correct client regardless of the protocol.
 
 ## Shared Infrastructure
 
 Tele-Remote integrates with a suite of centralized Go libraries maintained across the ecosystem:
 
 - **[message-serializers](https://github.com/Bastien-Antigravity/message-serializers):** High-efficiency JSON/Binary marshaling.
-- **[flexible-logger](https://github.com/Bastien-Antigravity/flexible-logger):** Unified structured logging.
+- **[universal-logger](https://github.com/Bastien-Antigravity/universal-logger):** Unified structured logging with I-prefix standards.
 - **distributed-config:** Global configuration for clustered deployments.
 
 ## Configuration & Setup
 
 ### Go Service
 
-The Go server utilizes `viper` and `distributed-config` for unified settings.
+The Go server utilizes `viper` (v1.21+) and `distributed-config` for unified settings.
 
 **Key Configuration (config.yaml):**
 ```yaml
@@ -39,8 +47,6 @@ TB_PORT: 50051  # gRPC binding port
 nats:
   servers: ["nats://localhost:4222"]
   subject_prefix: "teleremote"
-safesocket:
-  port: 6000
 ```
 
 **Running the Go Server:**
@@ -56,6 +62,5 @@ When the user sends `/start` to the Bot, it replies with an interactive keyboard
 * **⏏️ close all positions** : Signals connected systems to halt strategies and close open positions.
 * **🔌 Connected Nodes** : Lists all active components and dynamically generates their command menus on-the-fly!
 
-## Documentation
-For a detailed diagram and resume of the data flow, please see:
-- [doc/doc.doc](doc/doc.doc)
+## Persistence
+Tele-Remote persists the component registry to `src/assets/registry_state.json`. Upon restart, the bot restores dynamic menus and re-registers the associated command logic, allowing for seamless operation even if components are temporarily disconnected.

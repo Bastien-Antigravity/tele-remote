@@ -2,17 +2,19 @@ package publishers
 
 import (
 	"context"
+	"sync"
 
 	"github.com/Bastien-Antigravity/tele-remote/src/grpc_control"
 	"github.com/Bastien-Antigravity/tele-remote/src/interfaces"
 )
 
-// GrpcPublisher wraps a bidirectional gRPC stream and implements interfaces.Publisher
+// GrpcPublisher wraps a bidirectional gRPC stream and implements interfaces.IPublisher
 type GrpcPublisher struct {
 	stream grpc_control.TeleRemoteService_ConnectServer
+	mu     sync.Mutex
 }
 
-func NewGrpcPublisher(stream grpc_control.TeleRemoteService_ConnectServer) interfaces.Publisher {
+func NewGrpcPublisher(stream grpc_control.TeleRemoteService_ConnectServer) interfaces.IPublisher {
 	return &GrpcPublisher{stream: stream}
 }
 
@@ -21,12 +23,12 @@ func (p *GrpcPublisher) PublishCommand(ctx context.Context, cmdType int32, paylo
 		CommandType:   grpc_control.BotCommand_CommandType(cmdType),
 		CustomPayload: payload,
 	}
-	// Note: gRPC streams are not safe for concurrent calling of SendMsg.
-	// We rely on the Bot's mutex or sequential callback execution.
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	return p.stream.Send(cmd)
 }
 
 func (p *GrpcPublisher) Close() error {
-	// Let the gRPC server or client handle disconnection natively
 	return nil
 }

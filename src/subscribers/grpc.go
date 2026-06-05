@@ -19,11 +19,11 @@ type GrpcSubscriber struct {
 	log      interfaces.Logger
 	bindIP   string
 	bindPort int
-	cbs      tele_interfaces.SubscriberCallbacks
+	cbs      tele_interfaces.ISubscriberCallbacks
 	grpcSrv  *grpc.Server
 }
 
-func NewGrpcSubscriber(l interfaces.Logger, ip string, port int) tele_interfaces.Subscriber {
+func NewGrpcSubscriber(l interfaces.Logger, ip string, port int) tele_interfaces.ISubscriber {
 	return &GrpcSubscriber{
 		log:      l,
 		bindIP:   ip,
@@ -31,7 +31,7 @@ func NewGrpcSubscriber(l interfaces.Logger, ip string, port int) tele_interfaces
 	}
 }
 
-func (s *GrpcSubscriber) StartListen(ctx context.Context, cbs tele_interfaces.SubscriberCallbacks) error {
+func (s *GrpcSubscriber) StartListen(ctx context.Context, cbs tele_interfaces.ISubscriberCallbacks) error {
 	s.cbs = cbs
 	addr := fmt.Sprintf("%s:%d", s.bindIP, s.bindPort)
 	lis, err := net.Listen("tcp", addr)

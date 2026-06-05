@@ -1,7 +1,6 @@
 package telegram
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 
@@ -14,7 +13,7 @@ import (
 // -----------------------------------------------------------------------------
 
 // OnComponentConnected is triggered when a client connects via gRPC or NATS
-func (bot *Bot) OnComponentConnected(clientID, componentName, menuJSON string, pub interfaces.Publisher) {
+func (bot *Bot) OnComponentConnected(clientID, componentName, menuJSON string, pub interfaces.IPublisher) {
 	if menuJSON == "" {
 		return
 	}
@@ -55,18 +54,6 @@ func (bot *Bot) OnComponentConnected(clientID, componentName, menuJSON string, p
 	}
 
 	bot.log.Info("Dynamic menu registered", "client", clientID, "rows", len(root.Rows))
-}
-
-// -----------------------------------------------------------------------------
-
-// OnComponentDisconnected cleans up memory and publishers
-func (bot *Bot) OnComponentDisconnected(clientID string) {
-	bot.mu.Lock()
-	defer bot.mu.Unlock()
-
-	delete(bot.dynamicMenus, clientID)
-	delete(bot.publishers, clientID)
-	bot.log.Info("Component disconnected", "client", clientID)
 }
 
 // -----------------------------------------------------------------------------
@@ -115,23 +102,14 @@ func (bot *Bot) parseButton(data map[string]interface{}, clientID string) models
 		payload = p
 	}
 
-	uniqueID := bot.registerAction(func(ctx tb.Context) error {
-		bot.mu.RLock()
-		pub, ok := bot.publishers[clientID]
-		bot.mu.RUnlock()
+	uniqueID := bot.registerAction(bot.createCommandAction(clientID, cmdType, payload, label))
 
-		if !ok {
-			return ctx.Send("❌ Component disconnected.")
-		}
-
-		bot.log.Info("Executing component command", "client", clientID, "type", cmdType)
-		if err := pub.PublishCommand(context.Background(), cmdType, payload); err != nil {
-			return ctx.Send(fmt.Sprintf("⚠️ Failed to send command: %v", err))
-		}
-		return ctx.Send(fmt.Sprintf("✅ Sent: %s", label))
-	})
-
-	return models.CommandButton{Label: label, CallbackData: uniqueID}
+	return models.CommandButton{
+		Label:        label,
+		CallbackData: uniqueID,
+		CommandType:  cmdType,
+		Payload:      payload,
+	}
 }
 
 // -----------------------------------------------------------------------------

@@ -1,15 +1,25 @@
-# AI---
+---
+microservice: obsidian-brain
+type: note
+status: active
+tags:
+- '#service/obsidian-brain'
+- '#type/note'
+- '#state/active'
+- '#zone/3-fleet'
+---# AI---
 microservice: tele-remote
 type: session-state
 status: active
 lifecycle:
   active_branch: develop
   protected_branches: [main, master]
-  current_version: 1.2.0
+  current_version: 1.3.0
   version_source: VERSION.txt
 done_when:
-  - bot_verified: false
-  - decision_log_updated: false
+  - bot_verified: true
+  - persistence_functional: true
+  - standards_aligned: true
 directives:
   - autonomous-doc-sync: mandatory
   - obsidian-brain-sync: mandatory
@@ -17,24 +27,22 @@ directives:
 ---
 
 ## Current Focus
-Standardization and Cleanup of the repository to align with ecosystem rules and fix configuration inconsistencies.
+Maintaining the refactored core and ensuring transport stability.
 
-## Session History (2026-04-30)
-### Initial Audit
-- Performed synthesis of `tele-remote` functionality.
-- Identified legacy artifacts (`src/models/config.go`, `legacy-py/` references).
-- Spotted port inconsistencies across README, Docker, and Code.
-- Noted committed binaries in Git.
-
-### Standardization & Cleanup (Completed)
-- [x] Created `AI-Init.md`.
-- [x] Created `AI-Session-State.md`.
-- [x] Updated `README.md` (Removed legacy-py, fixed ports).
-- [x] Deleted `src/models/config.go`.
-- [x] Updated `.gitignore` and removed binaries.
-- [x] Aligned `docker-compose.yml` ports.
-- [x] Fixed compilation error in `main.go`.
+## Session History (2026-05-27)
+### Architectural Refactor & Standardization (Completed)
+- [x] **Removed SafeSocket**: Deleted skeleton files and configuration logic across the repo.
+- [x] **Interface Standardization**: Renamed `Publisher`/`Subscriber` to `IPublisher`/`ISubscriber` (I-prefix alignment).
+- [x] **Fixed Persistence**: Updated `CommandButton` to persist `CommandType` and `Payload`.
+- [x] **Logic Restoration**: Implemented `restoreMenuActions` to re-register bot callbacks after restart.
+- [x] **Hardened Transports**: 
+    - Added `sync.Mutex` to `GrpcPublisher`.
+    - Implemented `context.WithTimeout` (10s) for command dispatch.
+    - Standardized `StartListen` to block consistently (fixed NATS listener).
+- [x] **Cleaned Dead Code**: Removed redundant `OnComponentDisconnected` handler.
+- [x] **Dependency Resolution**: Updated `viper` (v1.21.0) and `google.golang.org/api` to resolve ambiguous `genproto` imports.
+- [x] **Workspace Alignment**: Added `tele-remote` to `go.work`.
 
 ## Open Items
-- [ ] Implement persistence for dynamic menus (Future task).
-- [ ] Add health-check mechanism (Future task).
+- [ ] Implement health-check mechanism (Future task).
+- [ ] Add rate-limiting for Telegram broadcasts.
