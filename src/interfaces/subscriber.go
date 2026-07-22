@@ -1,6 +1,8 @@
 package interfaces
 
-import "context"
+import (
+	"context"
+)
 
 // -----------------------------------------------------------------------------
 
@@ -9,7 +11,7 @@ type ISubscriberCallbacks struct {
 	// OnTelemetry receives raw logs/events from the component
 	OnTelemetry func(msg string)
 
-	// OnRegistration receives a specific menuJSON from a component
+	// OnRegistration receives a specific menu protobuf from a component
 	OnRegistration func(clientID, componentName, menuJSON string, pub IPublisher)
 
 	// OnDisconnect handles cleanup when a component drops

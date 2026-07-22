@@ -25,6 +25,7 @@ type CommandButton struct {
 	NextMenu     *CommandMenu `json:"next_menu"`     // for sub-menus
 	CommandType  int32        `json:"command_type"`  // persisted for logic restore
 	Payload      string       `json:"payload"`       // persisted for logic restore
+	InputPrompt  string       `json:"input_prompt"`  // If set, ask user for text
 }
 
 // -----------------------------------------------------------------------------

@@ -3,87 +3,114 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
+	"strings"
 
-	"github.com/Bastien-Antigravity/tele-remote/src/config"
+	toolbox_config "github.com/Bastien-Antigravity/microservice-toolbox/go/pkg/config"
 	tele_interfaces "github.com/Bastien-Antigravity/tele-remote/src/interfaces"
-	"github.com/Bastien-Antigravity/tele-remote/src/store"
 	"github.com/Bastien-Antigravity/tele-remote/src/subscribers"
-	"github.com/Bastien-Antigravity/tele-remote/src/telegram"
+
+	"github.com/Bastien-Antigravity/tele-remote/src/telegram/core"
+	"github.com/Bastien-Antigravity/tele-remote/src/telegram/routes"
+	"github.com/Bastien-Antigravity/tele-remote/src/telegram/ui"
 
 	toolbox_lifecycle "github.com/Bastien-Antigravity/microservice-toolbox/go/pkg/lifecycle"
 	unilog "github.com/Bastien-Antigravity/universal-logger/src/bootstrap"
 	unilog_config "github.com/Bastien-Antigravity/universal-logger/src/config"
 )
 
-// -----------------------------------------------------------------------------
-// Main Entry Point
-// -----------------------------------------------------------------------------
+// TeleRemoteCap matches the specific capability for this service
+type TeleRemoteCap struct {
+	Token  string `json:"token"`
+	ChatID string `json:"chat_id"`
+	URL    string `json:"url"`
+	IP     string `json:"ip"`
+	Port   string `json:"port"`
+}
 
 func main() {
 	// 1. Initialize Configuration via Toolbox (handles --profile automatically)
-	cfg, err := config.LoadConfig("standalone")
+	appConfig, err := toolbox_config.LoadConfig("standalone", nil)
 	if err != nil {
 		fmt.Printf("Critical Error loading config: %v\n", err)
 		os.Exit(1)
 	}
 
-	// -----------------------------------------------------------------------------
-
 	// 2. Initialize Logger (Standardized Bootstrap)
-	_, log := unilog.Init("tele-remote", cfg.AppConfig.Profile, "no_lock", "INFO", false, &unilog_config.DistConfig{Config: cfg.Config})
+	_, log := unilog.Init("tele-remote", appConfig.Profile, "no_lock", "INFO", false, &unilog_config.DistConfig{Config: appConfig.Config})
 	defer log.Close()
 
-	// Inject logger into Config for toolbox internal logs
-	cfg.AppConfig.Logger = log
-	log.Info("Tele-Remote starting with profile: %s", cfg.AppConfig.Profile)
+	appConfig.Logger = log
+	log.Info("Tele-Remote starting with profile: %s", appConfig.Profile)
 
-	// -----------------------------------------------------------------------------
+	// 3. Extract Capabilities
+	var tr TeleRemoteCap
+	if err := appConfig.Config.GetCapability("tele_remote", &tr); err != nil {
+		log.Critical("Tele-Remote capability missing: %v", err)
+		os.Exit(1)
+	}
+	
+	token := strings.TrimSpace(strings.Trim(tr.Token, "\""))
+	chatID := strings.TrimSpace(strings.Trim(tr.ChatID, "\""))
+	url := strings.TrimSpace(tr.URL)
+	url = strings.TrimRight(url, "/")
 
-	// 3. Initialize Persistence (Minimal State)
-	pm := store.NewPersistenceManager("src/assets/registry_state.json", log)
+	if token == "" {
+		log.Critical("Tele-Remote token is missing or empty")
+		os.Exit(1)
+	}
+	if chatID == "" {
+		log.Critical("Tele-Remote chat_id is missing or empty")
+		os.Exit(1)
+	}
+	if url == "" {
+		log.Critical("Tele-Remote url is missing or empty")
+		os.Exit(1)
+	}
 
-	// 4. Initialize Telegram Bot
-	bot, err := telegram.NewBot(cfg, log, pm)
+	bindAddr, err := appConfig.GetListenAddr("tele_remote")
+	if err != nil {
+		log.Critical("Failed to resolve bind address for tele_remote: %v", err)
+		os.Exit(1)
+	}
+	bindIP, bindPortStr, err := net.SplitHostPort(bindAddr)
+	if err != nil {
+		log.Critical("Failed to parse bind address '%s': %v", bindAddr, err)
+		os.Exit(1)
+	}
+	var bindPort int
+	if _, err := fmt.Sscanf(bindPortStr, "%d", &bindPort); err != nil {
+		log.Critical("Invalid bind port '%s': %v", bindPortStr, err)
+		os.Exit(1)
+	}
+
+	// 4. Initialize Telegram Bot Core
+	bot, err := core.NewBot(token, url, chatID, log)
 	if err != nil {
 		log.Critical("Failed to initialize Bot: %v", err)
 		os.Exit(1)
 	}
 
-	// 5. Wrap Bot methods into Subscriber Callbacks
+	// 5. Setup Routes
+	routes.SetupRoutes(bot)
+
+	// 6. Wrap Bot methods into Subscriber Callbacks
 	botCallbacks := tele_interfaces.ISubscriberCallbacks{
 		OnTelemetry:    bot.OnTelemetry,
-		OnRegistration: bot.OnComponentConnected,
+		OnRegistration: func(clientID, componentName, menuJSON string, pub tele_interfaces.IPublisher) {
+			ui.OnComponentConnected(bot, clientID, componentName, menuJSON, pub)
+		},
 		OnDisconnect:   bot.OnDisconnect,
 	}
 
-	// -----------------------------------------------------------------------------
-
-	// 6. Initialize Lifecycle Manager
+	// 7. Initialize Lifecycle Manager
 	lm := toolbox_lifecycle.NewManagerWithLogger(log)
-
-	// Register final state flush on shutdown
-	lm.Register("PersistenceFlush", bot.SaveState)
-
-	// Context for background listeners
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// -----------------------------------------------------------------------------
-
-	// 7. Start Subscribers (Transport Layer)
-	
-	// NATS Subscriber
-	natsSub := subscribers.NewNatsSubscriber(cfg, log)
-	go func() {
-		if err := natsSub.StartListen(ctx, botCallbacks); err != nil {
-			log.Error("NATS Subscriber failed to start: %v", err)
-		}
-	}()
-	lm.Register("NATS_Subscriber", natsSub.Close)
-
-	// gRPC Subscriber
-	grpcSub := subscribers.NewGrpcSubscriber(log, cfg.BindIP, cfg.BindPort)
+	// 8. Start Subscribers (Transport Layer)
+	grpcSub := subscribers.NewGrpcSubscriber(log, bindIP, bindPort)
 	go func() {
 		if err := grpcSub.StartListen(ctx, botCallbacks); err != nil {
 			log.Error("gRPC Subscriber failed: %v", err)
@@ -91,14 +118,12 @@ func main() {
 	}()
 	lm.Register("gRPC_Subscriber", grpcSub.Close)
 
-	// -----------------------------------------------------------------------------
-
-	// 8. Start the Bot
+	// 9. Start the Bot
 	go bot.Start(ctx)
 
-	// 9. Wait for Shutdown Signals via Toolbox Lifecycle
+	// 10. Wait for Shutdown Signals
 	log.Info("Service is ready and listening for commands")
 	lm.Wait(ctx)
-	
+
 	log.Info("Tele-Remote shutdown complete")
 }

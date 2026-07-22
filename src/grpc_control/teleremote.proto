@@ -26,10 +26,7 @@ message ComponentMessage {
 }
 
 message Registration {
-    // A JSON string representing a tree of menus and commands
-    string menu_json = 1; 
-    string sub_type = 2;
-    string pub_config = 3;
+    string menu_json = 1;
 }
 
 message QueueMessage {
@@ -47,9 +44,11 @@ message BotCommand {
         UNKNOWN = 0;
         POWER_OFF = 1;
         CLOSE_ALL_POSITIONS = 2;
+        REFRESH_MENU = 3;
         // Extendable for arbitrarily complex commands
         CUSTOM_COMMAND = 99;
     }
     CommandType command_type = 1;
     string custom_payload = 2;
+    string input = 3;
 }

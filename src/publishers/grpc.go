@@ -18,10 +18,21 @@ func NewGrpcPublisher(stream grpc_control.TeleRemoteService_ConnectServer) inter
 	return &GrpcPublisher{stream: stream}
 }
 
-func (p *GrpcPublisher) PublishCommand(ctx context.Context, cmdType int32, payload string) error {
+func (p *GrpcPublisher) PublishCommand(ctx context.Context, cmdType int32, payload, input string) error {
 	cmd := &grpc_control.BotCommand{
 		CommandType:   grpc_control.BotCommand_CommandType(cmdType),
 		CustomPayload: payload,
+		Input:         input,
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.stream.Send(cmd)
+}
+
+func (p *GrpcPublisher) RequestRefresh(ctx context.Context) error {
+	cmd := &grpc_control.BotCommand{
+		CommandType: grpc_control.BotCommand_REFRESH_MENU,
 	}
 
 	p.mu.Lock()
