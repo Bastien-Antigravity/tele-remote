@@ -2,6 +2,11 @@
 microservice: tele-remote
 type: governance
 status: active
+tags:
+- '#service/tele-remote'
+- '#type/governance'
+- '#state/active'
+- '#zone/3-fleet'
 ---
 
 # ⚡ AI Initialization: tele-remote
