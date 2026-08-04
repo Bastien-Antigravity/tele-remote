@@ -50,7 +50,7 @@ func main() {
 		log.Critical("Tele-Remote capability missing: %v", err)
 		os.Exit(1)
 	}
-	
+
 	token := strings.TrimSpace(strings.Trim(tr.Token, "\""))
 	chatID := strings.TrimSpace(strings.Trim(tr.ChatID, "\""))
 	url := strings.TrimSpace(tr.URL)
@@ -97,11 +97,11 @@ func main() {
 
 	// 6. Wrap Bot methods into Subscriber Callbacks
 	botCallbacks := tele_interfaces.ISubscriberCallbacks{
-		OnTelemetry:    bot.OnTelemetry,
+		OnTelemetry: bot.OnTelemetry,
 		OnRegistration: func(clientID, componentName, menuJSON string, pub tele_interfaces.IPublisher) {
 			ui.OnComponentConnected(bot, clientID, componentName, menuJSON, pub)
 		},
-		OnDisconnect:   bot.OnDisconnect,
+		OnDisconnect: bot.OnDisconnect,
 	}
 
 	// 7. Initialize Lifecycle Manager

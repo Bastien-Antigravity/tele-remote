@@ -23,7 +23,7 @@ func SetupRoutes(bot *core.Bot) {
 
 	bot.B.Handle("/start", func(c tb.Context) error {
 		bot.Log.Info("User triggered /start", "user", c.Sender().ID)
-		
+
 		// Reset user state to main menu
 		bot.Mu.Lock()
 		delete(bot.UserStates, c.Chat().ID)
@@ -34,16 +34,16 @@ func SetupRoutes(bot *core.Bot) {
 			photo := &tb.Photo{File: tb.FromReader(bytes.NewReader(startImage))}
 			_ = bot.Send(c, photo)
 		}
-		
+
 		return ui.ShowMainMenu(bot, c)
 	})
 
 	bot.B.Handle(&btnPowerOff, func(c tb.Context) error {
 		bot.Log.Info("PowerOff triggered via Telegram")
-		
+
 		bot.Mu.RLock()
 		for _, pub := range bot.Publishers {
-			_ = pub.PublishCommand(context.Background(), int32(models.CmdPowerOff), "", "") 
+			_ = pub.PublishCommand(context.Background(), int32(models.CmdPowerOff), "", "")
 		}
 		bot.Mu.RUnlock()
 
@@ -52,7 +52,7 @@ func SetupRoutes(bot *core.Bot) {
 
 	bot.B.Handle(&btnCloseAll, func(c tb.Context) error {
 		bot.Log.Info("CloseAllPositions triggered via Telegram")
-		
+
 		bot.Mu.RLock()
 		for _, pub := range bot.Publishers {
 			_ = pub.PublishCommand(context.Background(), int32(models.CmdStop), "", "")

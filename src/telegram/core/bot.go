@@ -32,9 +32,9 @@ type Bot struct {
 	ActionMap     map[string]models.CallbackAction
 	CbCounter     int
 	Publishers    map[string]tele_interfaces.IPublisher
-	UserStates    map[int64]string // chatID -> current component ID
+	UserStates    map[int64]string                // chatID -> current component ID
 	PendingInputs map[int64]*models.CommandButton // chatID -> button waiting for text
-	UserPaths     map[int64][]string // chatID -> breadcrumbs for "Back" button
+	UserPaths     map[int64][]string              // chatID -> breadcrumbs for "Back" button
 }
 
 // NewBot registers Telebot settings and initializes memory maps
@@ -43,7 +43,7 @@ func NewBot(token, url, chatID string, log unilog_ifaces.Logger) (*Bot, error) {
 		Token:  token,
 		Poller: &tb.LongPoller{Timeout: 10 * time.Second},
 	}
-	
+
 	if url != "" {
 		pref.URL = url
 	} else {
@@ -75,6 +75,7 @@ func NewBot(token, url, chatID string, log unilog_ifaces.Logger) (*Bot, error) {
 
 	return bot, nil
 }
+
 // Start begins polling
 func (bot *Bot) Start(ctx context.Context) {
 	bot.B.Use(bot.LoggingMiddleware())

@@ -6,8 +6,8 @@ import tb "gopkg.in/telebot.v3"
 
 // ComponentMenu holds the structured tree for a single registered component
 type ComponentMenu struct {
-	Name     string `json:"name"`
-	ClientID string `json:"client_id"`
+	Name     string       `json:"name"`
+	ClientID string       `json:"client_id"`
 	Root     *CommandMenu `json:"root"`
 }
 
@@ -39,9 +39,9 @@ type CommandRow struct {
 
 // CommandMenu represents a structured Telegram keyboard mapping
 type CommandMenu struct {
-	Title   string `json:"title"` // displayed as header
+	Title   string       `json:"title"` // displayed as header
 	Rows    []CommandRow `json:"rows"`
-	Caption string `json:"caption"`
+	Caption string       `json:"caption"`
 }
 
 // Standard Command Types
