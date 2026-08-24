@@ -3,7 +3,6 @@ module github.com/Bastien-Antigravity/tele-remote
 go 1.25.8
 
 require (
-	github.com/Bastien-Antigravity/message-serializers v1.0.1
 	github.com/Bastien-Antigravity/microservice-toolbox v0.0.1
 	github.com/Bastien-Antigravity/universal-logger v0.0.1
 	github.com/nats-io/nats.go v1.50.0
