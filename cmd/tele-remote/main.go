@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	toolbox_config "github.com/Bastien-Antigravity/microservice-toolbox/go/pkg/config"
+	toolbox_bootstrap "github.com/Bastien-Antigravity/microservice-toolbox/go/pkg/bootstrap"
 	tele_interfaces "github.com/Bastien-Antigravity/tele-remote/src/interfaces"
 	"github.com/Bastien-Antigravity/tele-remote/src/subscribers"
 
@@ -16,8 +16,6 @@ import (
 	"github.com/Bastien-Antigravity/tele-remote/src/telegram/ui"
 
 	toolbox_lifecycle "github.com/Bastien-Antigravity/microservice-toolbox/go/pkg/lifecycle"
-	unilog "github.com/Bastien-Antigravity/universal-logger/src/bootstrap"
-	unilog_config "github.com/Bastien-Antigravity/universal-logger/src/config"
 )
 
 // TeleRemoteCap matches the specific capability for this service
@@ -30,18 +28,10 @@ type TeleRemoteCap struct {
 }
 
 func main() {
-	// 1. Initialize Configuration via Toolbox (handles --profile automatically)
-	appConfig, err := toolbox_config.LoadConfig("standalone", nil)
-	if err != nil {
-		fmt.Printf("Critical Error loading config: %v\n", err)
-		os.Exit(1)
-	}
-
-	// 2. Initialize Logger (Standardized Bootstrap)
-	_, log := unilog.Init("tele-remote", appConfig.Profile, "no_lock", "INFO", false, &unilog_config.DistConfig{Config: appConfig.Config})
+	// 1. Initialize Service via Unified Ecosystem Bootstrapper
+	appConfig, log := toolbox_bootstrap.BootstrapService("tele-remote")
 	defer log.Close()
 
-	appConfig.Logger = log
 	log.Info("Tele-Remote starting with profile: %s", appConfig.Profile)
 
 	// 3. Extract Capabilities
