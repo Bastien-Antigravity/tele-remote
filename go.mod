@@ -5,7 +5,6 @@ go 1.25.8
 require (
 	github.com/Bastien-Antigravity/microservice-toolbox v0.0.1
 	github.com/Bastien-Antigravity/universal-logger v0.0.1
-	github.com/nats-io/nats.go v1.50.0
 	google.golang.org/grpc v1.81.1
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/telebot.v3 v3.3.8
@@ -21,11 +20,7 @@ require (
 	github.com/Bastien-Antigravity/safe-socket v0.0.1 // indirect
 	github.com/colega/zeropool v0.0.0-20230505084239-6fb4a4f75381 // indirect
 	github.com/edsrzf/mmap-go v1.2.0 // indirect
-	github.com/klauspost/compress v1.18.5 // indirect
-	github.com/nats-io/nkeys v0.4.15 // indirect
-	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
-	golang.org/x/crypto v0.51.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.45.0 // indirect
@@ -36,14 +31,10 @@ require (
 
 replace github.com/spf13/viper => github.com/spf13/viper v1.21.0
 
-
-
-
-
 replace (
-	github.com/Bastien-Antigravity/microservice-toolbox => ../microservice-toolbox
 	github.com/Bastien-Antigravity/distributed-config => ../distributed-config
+	github.com/Bastien-Antigravity/flexible-logger => ../flexible-logger
+	github.com/Bastien-Antigravity/microservice-toolbox => ../microservice-toolbox
 	github.com/Bastien-Antigravity/safe-socket => ../safe-socket
 	github.com/Bastien-Antigravity/universal-logger => ../universal-logger
-	github.com/Bastien-Antigravity/flexible-logger => ../flexible-logger
 )

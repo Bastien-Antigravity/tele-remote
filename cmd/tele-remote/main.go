@@ -46,6 +46,21 @@ func main() {
 	url := strings.TrimSpace(tr.URL)
 	url = strings.TrimRight(url, "/")
 
+	// Sovereign on-demand decryption for tele-remote credentials
+	decToken, err := appConfig.DecryptSecret(token)
+	if err != nil {
+		log.Critical("Failed to decrypt Tele-Remote token: %v", err)
+		os.Exit(1)
+	}
+	token = decToken
+
+	decChatID, err := appConfig.DecryptSecret(chatID)
+	if err != nil {
+		log.Critical("Failed to decrypt Tele-Remote chat_id: %v", err)
+		os.Exit(1)
+	}
+	chatID = decChatID
+
 	if token == "" {
 		log.Critical("Tele-Remote token is missing or empty")
 		os.Exit(1)
