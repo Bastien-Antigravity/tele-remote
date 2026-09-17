@@ -1,8 +1,8 @@
 services:
   tele-remote:
     build:
-      context: ...
-      dockerfile: tele-remote/Dockerfile
+      context: .
+      dockerfile: Dockerfile
     image: ghcr.io/bastien-antigravity/tele-remote:${TAG:-latest}
     container_name: tele-remote
     restart: unless-stopped
@@ -15,3 +15,4 @@ services:
 networks:
   teleremote-network:
     name: teleremote-network
+    external: true

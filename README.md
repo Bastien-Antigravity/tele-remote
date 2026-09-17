@@ -33,18 +33,26 @@ Tele-Remote integrates with a suite of centralized Go libraries maintained acros
 
 ## Configuration & Setup
 
-### Go Service
+### Unified Ecosystem Integration
 
-The Go server utilizes `viper` (v1.21+) and `distributed-config` for unified settings.
+`tele-remote` bootstraps using `microservice-toolbox` (`toolbox_bootstrap.BootstrapService("tele-remote")`), backed by `distributed-config`.
 
-**Key Configuration (config.yaml):**
+Configuration is loaded from `standalone.yaml` (symlinked to the active profile, e.g. `native.yaml`).
+
+**Ecosystem Capability (`standalone.yaml`):**
 
 ```yaml
-TB_TOKEN: "your_bot_token"
-TB_CHATID: "your_chat_id"
-TB_IP: "0.0.0.0"
-TB_PORT: 50051  # gRPC binding port
+capabilities:
+  tele_remote:
+    token: "ENC(...) or your_bot_token"
+    chat_id: "ENC(...) or your_chat_id"
+    ip: "127.0.0.1"
+    port: "1863" # Standard gRPC binding port
 ```
+
+Secrets prefixed with `ENC(...)` are automatically decrypted on-demand via the ecosystem's secure master key.
+
+Alternatively, environment variables `TR_TOKEN`, `TR_CHATID`, `TR_IP`, and `TR_PORT` can be supplied.
 
 **Running the Go Server:**
 
