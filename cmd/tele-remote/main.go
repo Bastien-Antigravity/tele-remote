@@ -30,6 +30,12 @@ type TeleRemoteCap struct {
 func main() {
 	// 1. Initialize Service via Unified Ecosystem Bootstrapper
 	appConfig, log := toolbox_bootstrap.BootstrapService("tele-remote")
+	if appConfig == nil {
+		panic("tele-remote: bootstrap failed to produce non-nil appConfig")
+	}
+	if log == nil {
+		panic("tele-remote: bootstrap failed to produce non-nil logger")
+	}
 	defer log.Close()
 
 	log.Info("Tele-Remote starting with profile: %s", appConfig.Profile)
