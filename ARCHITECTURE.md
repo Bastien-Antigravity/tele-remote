@@ -1,13 +1,15 @@
 ---
-microservice: obsidian-brain
+microservice: tele-remote
 type: note
 status: active
 tags:
-- '#service/obsidian-brain'
+- '#service/tele-remote'
 - '#type/note'
 - '#state/active'
 - '#zone/3-fleet'
----# Tele-Remote Architecture
+---
+
+# Tele-Remote Architecture
 
 Tele-Remote is the primary user interface gateway for the Bastien-Antigravity ecosystem, providing a dynamic command-and-control bridge via Telegram.
 

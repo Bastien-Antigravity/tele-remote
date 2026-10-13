@@ -1,9 +1,9 @@
 ---
-microservice: obsidian-brain
+microservice: tele-remote
 type: note
 status: active
 tags:
-- '#service/obsidian-brain'
+- '#service/tele-remote'
 - '#type/note'
 - '#state/active'
 - '#zone/3-fleet'

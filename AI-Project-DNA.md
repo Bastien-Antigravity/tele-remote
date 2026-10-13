@@ -1,17 +1,19 @@
-# Metadata
-- Version: 0.0.1
-- Classification: Level 1 Microservice
-
 ---
-microservice: obsidian-brain
+microservice: tele-remote
 type: note
 status: active
 tags:
-- '#service/obsidian-brain'
+- '#service/tele-remote'
 - '#type/note'
 - '#state/active'
 - '#zone/3-fleet'
----# 🧬 Project DNA: tele-remote
+---
+
+# 🧬 Project DNA: tele-remote
+
+## Metadata
+- Version: 0.0.1
+- Classification: Level 1 Microservice
 
 ## 🎯 High-Level Intent (BDD)
 - **Goal**: Remote execution and management of ecosystem components via Telegram or custom remote protocols.
