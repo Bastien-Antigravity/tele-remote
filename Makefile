@@ -1,4 +1,5 @@
 VERSION := $(shell cat VERSION.txt 2>/dev/null || echo "0.0.1")
+LDFLAGS := -s -w -X 'main.ServerVersion=$(VERSION)'
 
 .PHONY: all build test version clean
 
@@ -9,7 +10,8 @@ version:
 
 build:
 	@echo "Building repository (version $(VERSION))..."
-	@if [ -f "go.mod" ]; then go build ./... || true; fi
+	@mkdir -p bin
+	@if [ -f "go.mod" ]; then go build -ldflags="$(LDFLAGS)" -o bin/tele-remote ./cmd/tele-remote/main.go && go build -ldflags="$(LDFLAGS)" ./...; fi
 	@if [ -f "Cargo.toml" ]; then cargo build --release || true; fi
 	@if [ -f "setup.py" ] || [ -f "pyproject.toml" ]; then python3 -m build || true; fi
 

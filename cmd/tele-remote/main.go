@@ -16,6 +16,7 @@ import (
 	"github.com/Bastien-Antigravity/tele-remote/src/telegram/ui"
 
 	toolbox_lifecycle "github.com/Bastien-Antigravity/microservice-toolbox/go/pkg/lifecycle"
+	toolbox_version "github.com/Bastien-Antigravity/microservice-toolbox/go/pkg/version"
 )
 
 // TeleRemoteCap matches the specific capability for this service
@@ -26,6 +27,10 @@ type TeleRemoteCap struct {
 	IP     string `json:"ip"`
 	Port   string `json:"port"`
 }
+
+// ServerVersion defines the release version reported in logs and telemetry.
+// Dynamically resolved from microservice-toolbox (BuildVersion link-time flag or VERSION.txt).
+var ServerVersion = toolbox_version.Get()
 
 func main() {
 	// 1. Initialize Service via Unified Ecosystem Bootstrapper
@@ -38,7 +43,7 @@ func main() {
 	}
 	defer log.Close()
 
-	log.Info("Tele-Remote starting with profile: %s", appConfig.Profile)
+	log.Info("Tele-Remote (version %s) starting with profile: %s", ServerVersion, appConfig.Profile)
 
 	// 3. Extract Capabilities
 	var tr TeleRemoteCap
