@@ -16,6 +16,7 @@ import (
 	"github.com/Bastien-Antigravity/tele-remote/src/telegram/ui"
 
 	toolbox_lifecycle "github.com/Bastien-Antigravity/microservice-toolbox/go/pkg/lifecycle"
+	toolbox_spec "github.com/Bastien-Antigravity/microservice-toolbox/go/pkg/spec"
 	toolbox_version "github.com/Bastien-Antigravity/microservice-toolbox/go/pkg/version"
 )
 
@@ -85,14 +86,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	bindAddr, err := appConfig.GetListenAddr("tele_remote")
+	grpcAddr, err := appConfig.GetListenAddr("tele_remote")
 	if err != nil {
 		log.Critical("Failed to resolve bind address for tele_remote: %v", err)
 		os.Exit(1)
 	}
-	bindIP, bindPortStr, err := net.SplitHostPort(bindAddr)
+	bindIP, bindPortStr, err := net.SplitHostPort(grpcAddr)
 	if err != nil {
-		log.Critical("Failed to parse bind address '%s': %v", bindAddr, err)
+		log.Critical("Failed to parse bind address '%s': %v", grpcAddr, err)
 		os.Exit(1)
 	}
 	var bindPort int
@@ -134,10 +135,26 @@ func main() {
 	}()
 	lm.Register("gRPC_Subscriber", grpcSub.Close)
 
-	// 9. Start the Bot
+	// 9. Register tele-remote specification with web-interface dynamically (linked to lifecycle)
+	_ = toolbox_spec.PublishWithLifecycle(appConfig, log, lm, "tele_remote", toolbox_spec.ServiceSpec{
+		Name:        "Tele Remote",
+		Tag:         "tele-remote",
+		URL:         fmt.Sprintf("http://%s", grpcAddr),
+		NavTitle:    "Tele Remote",
+		Layer:       "L1",
+		Category:    "Base Fleet",
+		Priority:    40,
+		Icon:        "fa-paper-plane",
+		Description: "Bidirectional Telegram bridge connecting distributed microservices and worker daemons to interactive bot menus.",
+		Protocol:    "gRPC Stream",
+		Framing:     fmt.Sprintf("Port %d gRPC Stream", bindPort),
+		DocLink:     "obsidian-brain/06-Microservices/Tele-Remote-Hub.md",
+	})
+
+	// 10. Start the Bot
 	go bot.Start(ctx)
 
-	// 10. Wait for Shutdown Signals
+	// 11. Wait for Shutdown Signals
 	log.Info("Service is ready and listening for commands")
 	lm.Wait(ctx)
 
