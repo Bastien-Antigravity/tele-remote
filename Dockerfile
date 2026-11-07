@@ -21,7 +21,8 @@ COPY . .
 
 # Ensure dependencies are tidy and build binary
 RUN go mod tidy && \
-    CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /tele-remote-bin ./cmd/tele-remote
+    VERSION=$(cat VERSION.txt 2>/dev/null || echo "0.0.1") && \
+    CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w -X 'github.com/Bastien-Antigravity/microservice-toolbox/go/pkg/version.BuildVersion=${VERSION}'" -o /tele-remote-bin ./cmd/tele-remote
 
 # === RUNTIME STAGE ===
 FROM alpine:3.20
@@ -31,8 +32,9 @@ RUN apk add --no-cache ca-certificates tzdata
 
 WORKDIR /tele-remote
 
-# Copy the binary from the build stage
+# Copy the binary and VERSION.txt from the build stage
 COPY --from=builder /tele-remote-bin /tele-remote/tele-remote
+COPY --from=builder /workspace/tele-remote/VERSION.txt /tele-remote/VERSION.txt
 
 # Set the entrypoint
 ENTRYPOINT ["/tele-remote/tele-remote"]
