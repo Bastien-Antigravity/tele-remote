@@ -11,7 +11,7 @@
 ## Key Build & Test Commands
 ```bash
 # Build binary
-go build -o bin/tele-remote ./cmd/tele-remote/main.go
+go build -o bin/tele-remote ./cmd/tele-remote
 
 # Run tests
 go test -v ./...
@@ -22,7 +22,8 @@ go test -v ./...
 
 ## AI Development & Integration Guidelines
 1. **Dynamic UI Registration**: Client microservices send UI schemas over gRPC streams. `tele-remote` caches menus locally for instant navigation and updates asynchronously.
-2. **Encrypted Bot Credentials**: The Telegram bot token (`token`) and admin chat ID (`chat_id`) are stored as `ENC(...)` tokens and decrypted at startup via `appConfig.DecryptSecret()`.
-3. **Canonical Port**: Port `1863` is the authoritative gRPC port. Never hardcode legacy ports like `50051`.
-4. **Header Ritual**: All Go source files MUST begin with the standard Triple-Block header (`ESSENTIAL PROCESS`, `DATA FLOW`, `KEY PARAMETERS`).
-5. **Section Dividers**: Use `// -----------------------------------------------------------------------------` between exported methods and major sections.
+2. **OpenMFE `ServiceSpec` & Exchange Contracts**: Publishes its `ServiceSpec` (with embedded `teleremote.proto` and Telegram Bot API contracts via `cmd/tele-remote/contracts.go`) to `web-interface` (`PublishWithLifecycle`) so `<tele-remote-inspector>` displays authoritative contracts via `/api/v1/tele-remote/contracts`.
+3. **Encrypted Bot Credentials**: The Telegram bot token (`token`) and admin chat ID (`chat_id`) are stored as `ENC(...)` tokens and decrypted at startup via `appConfig.DecryptSecret()`.
+4. **Canonical Port**: Port `1863` is the authoritative gRPC port. Never hardcode legacy ports like `50051`.
+5. **Header Ritual**: All Go source files MUST begin with the standard Triple-Block header (`ESSENTIAL PROCESS`, `DATA FLOW`, `KEY PARAMETERS`).
+6. **Section Dividers**: Use `// -----------------------------------------------------------------------------` between exported methods and major sections.

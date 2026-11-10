@@ -149,6 +149,7 @@ func main() {
 		Protocol:    "gRPC Stream",
 		Framing:     fmt.Sprintf("Port %d gRPC Stream", bindPort),
 		DocLink:     "obsidian-brain/06-Microservices/Tele-Remote-Hub.md",
+		Contracts:   buildTeleRemoteContracts(grpcAddr, url, bindPort),
 	})
 
 	// 10. Start the Bot

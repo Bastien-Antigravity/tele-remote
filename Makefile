@@ -11,7 +11,7 @@ version:
 build:
 	@echo "Building repository (version $(VERSION))..."
 	@mkdir -p bin
-	@if [ -f "go.mod" ]; then go build -ldflags="$(LDFLAGS)" -o bin/tele-remote ./cmd/tele-remote/main.go && go build -ldflags="$(LDFLAGS)" ./...; fi
+	@if [ -f "go.mod" ]; then go build -ldflags="$(LDFLAGS)" -o bin/tele-remote ./cmd/tele-remote && go build -ldflags="$(LDFLAGS)" ./...; fi
 	@if [ -f "Cargo.toml" ]; then cargo build --release || true; fi
 	@if [ -f "setup.py" ] || [ -f "pyproject.toml" ]; then python3 -m build || true; fi
 
