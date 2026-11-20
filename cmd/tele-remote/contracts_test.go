@@ -20,4 +20,3 @@ func TestBuildTeleRemoteContracts(t *testing.T) {
 		t.Fatalf("unexpected telegram contract: %+v", contracts[1])
 	}
 }
-

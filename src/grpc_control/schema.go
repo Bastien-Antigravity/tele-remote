@@ -6,4 +6,3 @@ import _ "embed"
 //
 //go:embed teleremote.proto
 var TeleRemoteProtoSchema string
-

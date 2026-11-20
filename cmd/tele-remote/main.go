@@ -139,7 +139,7 @@ func main() {
 	_ = toolbox_spec.PublishWithLifecycle(appConfig, log, lm, "tele_remote", toolbox_spec.ServiceSpec{
 		Name:        "Tele Remote",
 		Tag:         "tele-remote",
-		URL:         fmt.Sprintf("http://%s", grpcAddr),
+		URL:         toolbox_spec.ResolveMFEURL(appConfig, fmt.Sprintf("http://%s", grpcAddr)),
 		NavTitle:    "Tele Remote",
 		Layer:       "L1",
 		Category:    "Base Fleet",
