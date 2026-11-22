@@ -210,7 +210,7 @@ func TestBot_AuthMiddlewareRejectsUnauthorizedChatID(t *testing.T) {
 	defer ms.Close()
 
 	logger := &MockLogger{}
-	bot, err := NewBot("12345:TEST_TOKEN", ms.server.URL, "12345678", logger)
+	bot, err := NewBot("12345:TEST_TOKEN", ms.server.URL, "12345678, 87654321", logger, "99990000")
 	if err != nil {
 		t.Fatalf("Failed to init bot: %v", err)
 	}
@@ -230,16 +230,94 @@ func TestBot_AuthMiddlewareRejectsUnauthorizedChatID(t *testing.T) {
 	if handlerCalled {
 		t.Fatal("Protected handler must NOT be executed for unauthorized ChatID")
 	}
-	if len(unauthCtx.sentMsgs) != 1 || unauthCtx.sentMsgs[0] != "⛔ Unauthorized access." {
-		t.Fatalf("Expected unauthorized response '⛔ Unauthorized access.', got %v", unauthCtx.sentMsgs)
+	if len(unauthCtx.sentMsgs) != 1 || !strings.HasPrefix(unauthCtx.sentMsgs[0], "⛔ Unauthorized access.") {
+		t.Fatalf("Expected unauthorized response starting with '⛔ Unauthorized access.', got %v", unauthCtx.sentMsgs)
+	}
+	if !strings.Contains(unauthCtx.sentMsgs[0], "88888888") {
+		t.Fatalf("Expected unauthorized response to mention User ID 88888888, got %s", unauthCtx.sentMsgs[0])
 	}
 
-	// 2. Authorized ChatID must pass through to handler
-	authCtx := newFakeContext(12345678, 111, "/start")
-	if err := protectedHandler(authCtx); err != nil {
+	// 2. Authorized ChatID (first from comma list) must pass through to handler
+	authCtx1 := newFakeContext(12345678, 111, "/start")
+	if err := protectedHandler(authCtx1); err != nil {
 		t.Fatalf("Unexpected error for authorized ChatID: %v", err)
 	}
 	if !handlerCalled {
-		t.Fatal("Protected handler must be executed for authorized ChatID")
+		t.Fatal("Protected handler must be executed for authorized ChatID 12345678")
+	}
+
+	// 3. Authorized Sender from second item in comma list
+	handlerCalled = false
+	authCtx2 := newFakeContext(999, 87654321, "/start")
+	if err := protectedHandler(authCtx2); err != nil {
+		t.Fatalf("Unexpected error for authorized Sender: %v", err)
+	}
+	if !handlerCalled {
+		t.Fatal("Protected handler must be executed for authorized Sender 87654321")
+	}
+
+	// 4. Authorized ID from AllowedUsers
+	handlerCalled = false
+	authCtx3 := newFakeContext(999, 99990000, "/start")
+	if err := protectedHandler(authCtx3); err != nil {
+		t.Fatalf("Unexpected error for allowed user: %v", err)
+	}
+	if !handlerCalled {
+		t.Fatal("Protected handler must be executed for AllowedUsers ID 99990000")
+	}
+}
+
+// -----------------------------------------------------------------------------
+
+func TestBot_RateLimitMiddleware(t *testing.T) {
+	ms := newMockTelegramServer()
+	defer ms.Close()
+
+	logger := &MockLogger{}
+	bot, err := NewBot("12345:TEST_TOKEN", ms.server.URL, "12345678", logger)
+	if err != nil {
+		t.Fatalf("Failed to init bot: %v", err)
+	}
+	bot.Limiter = NewRateLimiter(2, 500*time.Millisecond, 1*time.Second)
+
+	callCount := 0
+	rlMw := bot.RateLimitMiddleware()
+	handler := rlMw(func(c tb.Context) error {
+		callCount++
+		return nil
+	})
+
+	ctx := newFakeContext(12345678, 12345678, "hello")
+
+	// 1st request -> allowed
+	if err := handler(ctx); err != nil {
+		t.Fatalf("Request 1 error: %v", err)
+	}
+	// 2nd request -> allowed
+	if err := handler(ctx); err != nil {
+		t.Fatalf("Request 2 error: %v", err)
+	}
+	if callCount != 2 {
+		t.Fatalf("Expected callCount=2, got %d", callCount)
+	}
+
+	// 3rd request -> throttled, sends warning
+	if err := handler(ctx); err != nil {
+		t.Fatalf("Request 3 error: %v", err)
+	}
+	if callCount != 2 {
+		t.Fatalf("Throttled request should not increment handler callCount, got %d", callCount)
+	}
+	if len(ctx.sentMsgs) == 0 || !strings.Contains(ctx.sentMsgs[0], "Slow down") {
+		t.Fatalf("Expected 'Slow down' warning message, got %v", ctx.sentMsgs)
+	}
+
+	// 4th request -> throttled, silent (cooldown)
+	msgCountBefore := len(ctx.sentMsgs)
+	if err := handler(ctx); err != nil {
+		t.Fatalf("Request 4 error: %v", err)
+	}
+	if len(ctx.sentMsgs) != msgCountBefore {
+		t.Fatalf("Flooded request in cooldown should not send another warning message")
 	}
 }

@@ -22,11 +22,12 @@ import (
 
 // TeleRemoteCap matches the specific capability for this service
 type TeleRemoteCap struct {
-	Token  string `json:"token"`
-	ChatID string `json:"chat_id"`
-	URL    string `json:"url"`
-	IP     string `json:"ip"`
-	Port   string `json:"port"`
+	Token        string `json:"token"`
+	ChatID       string `json:"chat_id"`
+	AllowedUsers string `json:"allowed_users"`
+	URL          string `json:"url"`
+	IP           string `json:"ip"`
+	Port         string `json:"port"`
 }
 
 // ServerVersion defines the release version reported in logs and telemetry.
@@ -55,6 +56,7 @@ func main() {
 
 	token := strings.TrimSpace(strings.Trim(tr.Token, "\""))
 	chatID := strings.TrimSpace(strings.Trim(tr.ChatID, "\""))
+	allowedUsers := strings.TrimSpace(strings.Trim(tr.AllowedUsers, "\""))
 	url := strings.TrimSpace(tr.URL)
 	url = strings.TrimRight(url, "/")
 
@@ -72,6 +74,15 @@ func main() {
 		os.Exit(1)
 	}
 	chatID = decChatID
+
+	if allowedUsers != "" {
+		decAllowedUsers, err := appConfig.DecryptSecret(allowedUsers)
+		if err != nil {
+			log.Critical("Failed to decrypt Tele-Remote allowed_users: %v", err)
+			os.Exit(1)
+		}
+		allowedUsers = decAllowedUsers
+	}
 
 	if token == "" {
 		log.Critical("Tele-Remote token is missing or empty")
@@ -103,7 +114,7 @@ func main() {
 	}
 
 	// 4. Initialize Telegram Bot Core
-	bot, err := core.NewBot(token, url, chatID, log)
+	bot, err := core.NewBot(token, url, chatID, log, allowedUsers)
 	if err != nil {
 		log.Critical("Failed to initialize Bot: %v", err)
 		os.Exit(1)

@@ -72,15 +72,47 @@ type Config struct {
 	TelegramToken string
 	TelegramURL   string
 	ChatID        string
+	AllowedUsers  string
+	AuthorizedIDs map[int64]struct{}
+	BroadcastIDs  []int64
+}
+
+// -----------------------------------------------------------------------------
+
+// parseAuthorizedIDs extracts unique numeric IDs from chatID and allowedUsers inputs on the cold path.
+func parseAuthorizedIDs(chatID string, allowedUsers ...string) (map[int64]struct{}, []int64) {
+	idSet := make(map[int64]struct{})
+	var broadcastList []int64
+
+	allSources := append([]string{chatID}, allowedUsers...)
+	for _, src := range allSources {
+		tokens := strings.FieldsFunc(src, func(r rune) bool {
+			return r == ',' || r == ';' || r == ' ' || r == '\t' || r == '\n'
+		})
+		for _, tok := range tokens {
+			trimmed := strings.TrimSpace(tok)
+			if trimmed == "" {
+				continue
+			}
+			if id, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
+				if _, exists := idSet[id]; !exists {
+					idSet[id] = struct{}{}
+					broadcastList = append(broadcastList, id)
+				}
+			}
+		}
+	}
+	return idSet, broadcastList
 }
 
 // -----------------------------------------------------------------------------
 
 // Bot holds the Telegram connection, config, non-blocking telemetry queue, and live state registry.
 type Bot struct {
-	B   *tb.Bot
-	Log unilog_ifaces.Logger
-	Cfg *Config
+	B       *tb.Bot
+	Log     unilog_ifaces.Logger
+	Cfg     *Config
+	Limiter *RateLimiter
 
 	Mu                   sync.RWMutex
 	DynamicMenus         map[string]*models.ComponentMenu
@@ -98,7 +130,7 @@ type Bot struct {
 // -----------------------------------------------------------------------------
 
 // NewBot registers Telebot settings, initializes memory maps, and starts the background telemetry worker.
-func NewBot(token, url, chatID string, log unilog_ifaces.Logger) (*Bot, error) {
+func NewBot(token, url, chatID string, log unilog_ifaces.Logger, allowedUsers ...string) (*Bot, error) {
 	pref := tb.Settings{
 		Token:  token,
 		Poller: &tb.LongPoller{Timeout: 10 * time.Second},
@@ -115,16 +147,27 @@ func NewBot(token, url, chatID string, log unilog_ifaces.Logger) (*Bot, error) {
 		return nil, fmt.Errorf("failed to init bot: %w", err)
 	}
 
+	allowedStr := ""
+	if len(allowedUsers) > 0 {
+		allowedStr = strings.Join(allowedUsers, ",")
+	}
+
+	authIDs, broadcastIDs := parseAuthorizedIDs(chatID, allowedUsers...)
+
 	cfg := &Config{
 		TelegramToken: token,
 		TelegramURL:   pref.URL,
 		ChatID:        chatID,
+		AllowedUsers:  allowedStr,
+		AuthorizedIDs: authIDs,
+		BroadcastIDs:  broadcastIDs,
 	}
 
 	bot := &Bot{
 		B:                    b,
 		Log:                  log,
 		Cfg:                  cfg,
+		Limiter:              NewRateLimiter(5, 2*time.Second, 3*time.Second),
 		DynamicMenus:         make(map[string]*models.ComponentMenu),
 		Publishers:           make(map[string]tele_interfaces.IPublisher),
 		UserStates:           make(map[ConversationKey]string),
@@ -182,23 +225,23 @@ func (bot *Bot) Start(ctx context.Context) {
 
 // -----------------------------------------------------------------------------
 
-// IsAuthorized checks whether the incoming Telegram context matches the configured ChatID.
+// IsAuthorized checks whether the incoming Telegram context matches any configured ChatID or AllowedUsers.
 func (bot *Bot) IsAuthorized(c tb.Context) bool {
-	if bot == nil || bot.Cfg == nil {
-		return false
-	}
-	allowed := strings.TrimSpace(bot.Cfg.ChatID)
-	if allowed == "" {
+	if bot == nil || bot.Cfg == nil || len(bot.Cfg.AuthorizedIDs) == 0 {
 		return false
 	}
 	if c == nil {
 		return false
 	}
-	if c.Chat() != nil && strconv.FormatInt(c.Chat().ID, 10) == allowed {
-		return true
+	if c.Sender() != nil {
+		if _, ok := bot.Cfg.AuthorizedIDs[c.Sender().ID]; ok {
+			return true
+		}
 	}
-	if c.Sender() != nil && strconv.FormatInt(c.Sender().ID, 10) == allowed {
-		return true
+	if c.Chat() != nil {
+		if _, ok := bot.Cfg.AuthorizedIDs[c.Chat().ID]; ok {
+			return true
+		}
 	}
 	return false
 }
@@ -211,14 +254,22 @@ func (bot *Bot) AuthMiddleware() tb.MiddlewareFunc {
 		return func(c tb.Context) error {
 			if !bot.IsAuthorized(c) {
 				var chatID, userID int64
+				var username string
 				if c != nil && c.Chat() != nil {
 					chatID = c.Chat().ID
 				}
 				if c != nil && c.Sender() != nil {
 					userID = c.Sender().ID
+					username = c.Sender().Username
 				}
-				bot.Log.Warning("Unauthorized Telegram access attemptRejected", "chat_id", chatID, "user_id", userID)
-				return bot.Send(c, "⛔ Unauthorized access.")
+				bot.Log.Warning("Unauthorized Telegram access attempt rejected",
+					"chat_id", chatID, "user_id", userID, "username", username)
+
+				errMsg := "⛔ Unauthorized access."
+				if userID != 0 || chatID != 0 {
+					errMsg = fmt.Sprintf("⛔ Unauthorized access.\n\nYour Telegram User ID: %d (Chat ID: %d)\nPlease add your ID to TR_CHATID or TR_ALLOWED_USERS in configuration.", userID, chatID)
+				}
+				return bot.Send(c, errMsg)
 			}
 			return next(c)
 		}
@@ -227,25 +278,18 @@ func (bot *Bot) AuthMiddleware() tb.MiddlewareFunc {
 
 // -----------------------------------------------------------------------------
 
-// Broadcast sends a plain text message to the pre-configured ChatID.
+// Broadcast sends a plain text message to all pre-configured ChatIDs.
 func (bot *Bot) Broadcast(msg string) {
-	if bot.Cfg == nil || strings.TrimSpace(bot.Cfg.ChatID) == "" {
-		bot.Log.Warning("Broadcast failed: TB_CHATID not set")
+	if bot.Cfg == nil || len(bot.Cfg.BroadcastIDs) == 0 {
+		bot.Log.Warning("Broadcast failed: no authorized broadcast chat IDs configured")
 		return
 	}
 
-	var chatID int64
-	if parsedID, parseErr := strconv.ParseInt(strings.TrimSpace(bot.Cfg.ChatID), 10, 64); parseErr == nil {
-		chatID = parsedID
-	} else {
-		bot.Log.Error("Broadcast failed: invalid ChatID format (must be numeric)", "chat_id", bot.Cfg.ChatID, "err", parseErr)
-		return
-	}
-
-	chat := &tb.Chat{ID: chatID}
-
-	if _, err := bot.B.Send(chat, msg); err != nil {
-		bot.Log.Error("failed to broadcast telemetry", "err", err)
+	for _, chatID := range bot.Cfg.BroadcastIDs {
+		chat := &tb.Chat{ID: chatID}
+		if _, err := bot.B.Send(chat, msg); err != nil {
+			bot.Log.Error("Failed to broadcast telemetry to chat", "chat_id", chatID, "err", err)
+		}
 	}
 }
 

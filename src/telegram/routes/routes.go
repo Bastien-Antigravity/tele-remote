@@ -36,7 +36,7 @@ var startImage []byte
 
 // SetupRoutes initializes global middlewares, static handlers, and dynamic reply-keyboard routing.
 func SetupRoutes(bot *core.Bot) {
-	bot.B.Use(bot.LoggingMiddleware(), bot.AuthMiddleware())
+	bot.B.Use(bot.RateLimitMiddleware(), bot.LoggingMiddleware(), bot.AuthMiddleware())
 
 	m := &tb.ReplyMarkup{}
 	btnPowerOff := m.Text(models.BtnPowerOff)
