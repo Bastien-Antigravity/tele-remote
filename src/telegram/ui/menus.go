@@ -1,5 +1,20 @@
 package ui
 
+/*
+ESSENTIAL PROCESS:
+Handles atomic dynamic menu registration, Reply Keyboard rendering, 2-step emergency
+command confirmations, scoped pending-input routing, and direct button action dispatch.
+
+DATA FLOW:
+1. OnComponentConnected validates and parses menuJSON into a CommandMenu tree before acquiring bot.Mu.Lock() to atomically swap the component session.
+2. RequestEmergencyConfirmation records a 60s PendingConfirmation per ConversationKey and renders a confirmation Reply Keyboard.
+3. HandleDynamicText resolves confirmations, pending text inputs (routed strictly to pending.ClientID), navigation controls, and direct menu button execution.
+
+KEY PARAMETERS:
+- convKey: Scoped ConversationKey{ChatID, UserID} isolating multi-user state within a chat.
+- menuJSON: Raw JSON array defining a component's interactive menu tree.
+*/
+
 import (
 	"context"
 	"encoding/json"
@@ -14,24 +29,42 @@ import (
 	tb "gopkg.in/telebot.v3"
 )
 
-// OnComponentConnected is triggered when a client connects via gRPC or NATS
+// -----------------------------------------------------------------------------
+
+const (
+	emergencyConfirmTTL = 60 * time.Second
+	pendingInputTTL     = 5 * time.Minute
+	commandTimeout      = 10 * time.Second
+)
+
+// -----------------------------------------------------------------------------
+
+func getConvKey(c tb.Context) core.ConversationKey {
+	return core.GetConvKey(c)
+}
+
+// -----------------------------------------------------------------------------
+
+func clonePath(path []string) []string {
+	if len(path) == 0 {
+		return []string{}
+	}
+	cp := make([]string, len(path))
+	copy(cp, path)
+	return cp
+}
+
+// -----------------------------------------------------------------------------
+
+// OnComponentConnected is triggered when a client connects via gRPC or NATS.
+// It unmarshals and validates menuJSON BEFORE locking bot.Mu so malformed payloads
+// never wipe out an existing valid component session.
 func OnComponentConnected(bot *core.Bot, clientID, componentName, menuJSON string, pub interfaces.IPublisher) {
 	bot.Log.Info("Component connection handshake starting", "id", clientID, "name", componentName)
-	if menuJSON == "" {
+	if strings.TrimSpace(menuJSON) == "" {
 		bot.Log.Warning("Component connected with empty menu", "id", clientID)
 		return
 	}
-
-	bot.Mu.Lock()
-	// Clean up old sessions with the same name to prevent duplicates
-	for id, m := range bot.DynamicMenus {
-		if m.Name == componentName {
-			delete(bot.DynamicMenus, id)
-			delete(bot.Publishers, id)
-		}
-	}
-	bot.Publishers[clientID] = pub
-	bot.Mu.Unlock()
 
 	var rawItems []map[string]interface{}
 	if err := json.Unmarshal([]byte(menuJSON), &rawItems); err != nil {
@@ -45,45 +78,70 @@ func OnComponentConnected(bot *core.Bot, clientID, componentName, menuJSON strin
 	}
 
 	for _, item := range rawItems {
-		row := parseMenuRow(bot, item, clientID)
+		row := parseMenuRow(item)
 		if len(row.Buttons) > 0 {
 			root.Rows = append(root.Rows, row)
 		}
 	}
 
-	bot.Mu.Lock()
-	bot.DynamicMenus[clientID] = &models.ComponentMenu{
+	compMenu := &models.ComponentMenu{
 		Name:     componentName,
 		ClientID: clientID,
 		Root:     root,
 	}
+
+	bot.Mu.Lock()
+	// Clean up old sessions with the same name to prevent duplicates
+	for id, m := range bot.DynamicMenus {
+		if m.Name == componentName && id != clientID {
+			delete(bot.DynamicMenus, id)
+			delete(bot.Publishers, id)
+			// Migrate or clean up user states pointing to the old session ID
+			for key, activeID := range bot.UserStates {
+				if activeID == id {
+					bot.UserStates[key] = clientID
+				}
+			}
+			for key, pending := range bot.PendingInputs {
+				if pending.ClientID == id {
+					delete(bot.PendingInputs, key)
+				}
+			}
+		}
+	}
+	bot.Publishers[clientID] = pub
+	bot.DynamicMenus[clientID] = compMenu
 	bot.Mu.Unlock()
 
 	bot.Log.Info("Dynamic menu registered", "client", clientID, "rows", len(root.Rows))
 }
 
-func parseMenuRow(bot *core.Bot, data map[string]interface{}, clientID string) models.CommandRow {
+// -----------------------------------------------------------------------------
+
+func parseMenuRow(data map[string]interface{}) models.CommandRow {
 	row := models.CommandRow{Buttons: []models.CommandButton{}}
 	if btns, ok := data["buttons"].([]interface{}); ok {
 		for _, b := range btns {
 			if bMap, ok := b.(map[string]interface{}); ok {
-				row.Buttons = append(row.Buttons, parseButton(bot, bMap, clientID))
+				row.Buttons = append(row.Buttons, parseButton(bMap))
 			}
 		}
 	} else {
-		row.Buttons = append(row.Buttons, parseButton(bot, data, clientID))
+		row.Buttons = append(row.Buttons, parseButton(data))
 	}
 	return row
 }
 
-func parseButton(bot *core.Bot, data map[string]interface{}, clientID string) models.CommandButton {
+// -----------------------------------------------------------------------------
+
+func parseButton(data map[string]interface{}) models.CommandButton {
 	label, _ := data["label"].(string)
 
 	if sub, ok := data["menu"].([]interface{}); ok {
 		subMenu := &models.CommandMenu{Title: label, Rows: []models.CommandRow{}}
 		for _, s := range sub {
 			if sMap, ok := s.(map[string]interface{}); ok {
-				subMenu.Rows = append(subMenu.Rows, parseMenuRow(bot, sMap, clientID))
+				subMenu.Rows = append(subMenu.Rows, parseMenuRow(sMap))
 			}
 		}
 		return models.CommandButton{Label: label, NextMenu: subMenu}
@@ -102,63 +160,15 @@ func parseButton(bot *core.Bot, data map[string]interface{}, clientID string) mo
 		inputPrompt = ip
 	}
 
-	uniqueID := registerAction(bot, createCommandAction(bot, clientID, cmdType, payload, label))
-
 	return models.CommandButton{
-		Label:        label,
-		CallbackData: uniqueID,
-		CommandType:  cmdType,
-		Payload:      payload,
-		InputPrompt:  inputPrompt,
+		Label:       label,
+		CommandType: cmdType,
+		Payload:     payload,
+		InputPrompt: inputPrompt,
 	}
 }
 
-func createCommandAction(bot *core.Bot, clientID string, cmdType int32, payload, label string) models.CallbackAction {
-	return func(ctx tb.Context) error {
-		bot.Mu.RLock()
-		pub, ok := bot.Publishers[clientID]
-		bot.Mu.RUnlock()
-
-		if !ok {
-			return bot.Send(ctx, "❌ Component disconnected.")
-		}
-
-		bot.Mu.RLock()
-		var btn *models.CommandButton
-		comp, ok := bot.DynamicMenus[clientID]
-		if ok {
-			btn = findButtonByLabel(comp.Root, label)
-		}
-		bot.Mu.RUnlock()
-
-		if btn != nil && btn.InputPrompt != "" {
-			bot.Mu.Lock()
-			bot.PendingInputs[ctx.Chat().ID] = btn
-			bot.Mu.Unlock()
-			return bot.Send(ctx, btn.InputPrompt, &tb.ReplyMarkup{RemoveKeyboard: true})
-		}
-
-		bot.Log.Info("Executing component command", "client", clientID, "type", cmdType)
-
-		dispatchCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		if err := pub.PublishCommand(dispatchCtx, cmdType, payload, ""); err != nil {
-			return bot.Send(ctx, fmt.Sprintf("⚠️ Failed to send command: %v", err))
-		}
-
-		return bot.Send(ctx, fmt.Sprintf("✅ Sent: %s", label))
-	}
-}
-
-func registerAction(bot *core.Bot, fn models.CallbackAction) string {
-	bot.Mu.Lock()
-	defer bot.Mu.Unlock()
-	bot.CbCounter++
-	id := fmt.Sprintf("dyn_%d", bot.CbCounter)
-	bot.ActionMap[id] = fn
-	return id
-}
+// -----------------------------------------------------------------------------
 
 func getMenuByPath(root *models.CommandMenu, path []string) *models.CommandMenu {
 	if root == nil {
@@ -186,63 +196,208 @@ func getMenuByPath(root *models.CommandMenu, path []string) *models.CommandMenu 
 	return current
 }
 
+// -----------------------------------------------------------------------------
+
 func findButtonInMenu(m *models.CommandMenu, label string) *models.CommandButton {
 	if m == nil {
 		return nil
 	}
 	for _, row := range m.Rows {
-		for _, b := range row.Buttons {
-			if b.Label == label {
-				return &b
+		for i := range row.Buttons {
+			if row.Buttons[i].Label == label {
+				btnCopy := row.Buttons[i]
+				return &btnCopy
 			}
 		}
 	}
 	return nil
 }
 
-func findButtonByLabel(m *models.CommandMenu, label string) *models.CommandButton {
-	if m == nil {
-		return nil
+// -----------------------------------------------------------------------------
+
+// RequestEmergencyConfirmation initiates a 2-step confirmation workflow for CmdPowerOff or CmdStop.
+func RequestEmergencyConfirmation(bot *core.Bot, c tb.Context, cmdType int32) error {
+	convKey := getConvKey(c)
+
+	var confirmLabel, promptText string
+	switch cmdType {
+	case models.CmdPowerOff:
+		confirmLabel = models.BtnConfirmPowerOff
+		promptText = "⚠️ Are you sure you want to POWER OFF all connected components? Please confirm within 60s."
+	case models.CmdStop:
+		confirmLabel = models.BtnConfirmCloseAll
+		promptText = "⚠️ Are you sure you want to CLOSE ALL POSITIONS across all connected components? Please confirm within 60s."
+	default:
+		return fmt.Errorf("unsupported emergency command type: %d", cmdType)
 	}
-	for _, row := range m.Rows {
-		for _, b := range row.Buttons {
-			if b.Label == label {
-				return &b
-			}
-			if b.NextMenu != nil {
-				if sub := findButtonByLabel(b.NextMenu, label); sub != nil {
-					return sub
-				}
-			}
-		}
+
+	bot.Mu.Lock()
+	bot.PendingConfirmations[convKey] = core.PendingConfirmation{
+		CommandType: cmdType,
+		ExpiresAt:   time.Now().Add(emergencyConfirmTTL),
 	}
-	return nil
+	bot.Mu.Unlock()
+
+	markup := &tb.ReplyMarkup{ResizeKeyboard: true}
+	markup.Reply(
+		markup.Row(markup.Text(confirmLabel)),
+		markup.Row(markup.Text(models.BtnCancel)),
+	)
+
+	return bot.Send(c, promptText, markup)
 }
 
-// HandleDynamicText routes text messages from Reply buttons back to actions
+// -----------------------------------------------------------------------------
+
+func executeEmergencyBroadcast(bot *core.Bot, c tb.Context, cmdType int32) error {
+	bot.Mu.RLock()
+	pubs := make([]interfaces.IPublisher, 0, len(bot.Publishers))
+	for _, pub := range bot.Publishers {
+		if pub != nil {
+			pubs = append(pubs, pub)
+		}
+	}
+	bot.Mu.RUnlock()
+
+	dispatchCtx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+
+	for _, pub := range pubs {
+		_ = pub.PublishCommand(dispatchCtx, cmdType, "", "")
+	}
+
+	switch cmdType {
+	case models.CmdPowerOff:
+		_ = bot.Send(c, "🆘 Powering off all components...")
+	case models.CmdStop:
+		_ = bot.Send(c, "🛑 Calling 'stop' on all components...")
+	}
+
+	return ShowMainMenu(bot, c)
+}
+
+// -----------------------------------------------------------------------------
+
+func executeButtonAction(bot *core.Bot, c tb.Context, convKey core.ConversationKey, clientID string, currentPath []string, btn *models.CommandButton) error {
+	bot.Mu.RLock()
+	pub, ok := bot.Publishers[clientID]
+	bot.Mu.RUnlock()
+
+	if !ok || pub == nil {
+		return bot.Send(c, "❌ Component disconnected.")
+	}
+
+	if btn.InputPrompt != "" {
+		bot.Mu.Lock()
+		bot.PendingInputs[convKey] = core.PendingInput{
+			ClientID:  clientID,
+			Button:    *btn,
+			Path:      clonePath(currentPath),
+			ExpiresAt: time.Now().Add(pendingInputTTL),
+		}
+		bot.Mu.Unlock()
+		return bot.Send(c, btn.InputPrompt, &tb.ReplyMarkup{RemoveKeyboard: true})
+	}
+
+	bot.Log.Info("Executing component command", "client", clientID, "type", btn.CommandType, "label", btn.Label)
+
+	dispatchCtx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+
+	if err := pub.PublishCommand(dispatchCtx, btn.CommandType, btn.Payload, ""); err != nil {
+		return bot.Send(c, fmt.Sprintf("⚠️ Failed to send command: %v", err))
+	}
+
+	err := bot.Send(c, fmt.Sprintf("✅ Sent: %s", btn.Label))
+	_ = pub.RequestRefresh(dispatchCtx)
+	return err
+}
+
+// -----------------------------------------------------------------------------
+
+// HandleDynamicText routes text messages from Reply buttons and user prompts back to actions.
 func HandleDynamicText(bot *core.Bot, c tb.Context) error {
 	text := c.Text()
+	convKey := getConvKey(c)
 
-	// 0. Intercept Input Mode
-	bot.Mu.Lock()
-	if pendingBtn, ok := bot.PendingInputs[c.Chat().ID]; ok {
-		delete(bot.PendingInputs, c.Chat().ID)
+	// 0a. Emergency command triggers via text fallback (if routed through OnText)
+	if text == models.BtnPowerOff {
+		return RequestEmergencyConfirmation(bot, c, models.CmdPowerOff)
+	}
+	if text == models.BtnCloseAll {
+		return RequestEmergencyConfirmation(bot, c, models.CmdStop)
+	}
+
+	// 0b. Handle 2-Step Emergency Confirmation buttons & cancellation
+	if text == models.BtnCancel {
+		bot.Mu.Lock()
+		_, hadConfirm := bot.PendingConfirmations[convKey]
+		delete(bot.PendingConfirmations, convKey)
+		delete(bot.PendingInputs, convKey)
+		bot.Mu.Unlock()
+		if hadConfirm {
+			_ = bot.Send(c, "❌ Emergency command cancelled.")
+		}
+		return ShowMainMenu(bot, c)
+	}
+
+	if text == models.BtnConfirmPowerOff || text == models.BtnConfirmCloseAll {
+		expectedCmd := models.CmdPowerOff
+		if text == models.BtnConfirmCloseAll {
+			expectedCmd = models.CmdStop
+		}
+
+		bot.Mu.Lock()
+		pendingConf, hasConf := bot.PendingConfirmations[convKey]
+		if hasConf {
+			delete(bot.PendingConfirmations, convKey)
+		}
 		bot.Mu.Unlock()
 
+		if !hasConf || pendingConf.CommandType != expectedCmd {
+			_ = bot.Send(c, "⚠️ No matching pending confirmation found.")
+			return ShowMainMenu(bot, c)
+		}
+		if time.Now().After(pendingConf.ExpiresAt) {
+			_ = bot.Send(c, "⏰ Confirmation expired. Command aborted.")
+			return ShowMainMenu(bot, c)
+		}
+
+		return executeEmergencyBroadcast(bot, c, expectedCmd)
+	}
+
+	// Any other interaction clears an unconfirmed PendingConfirmation
+	bot.Mu.Lock()
+	delete(bot.PendingConfirmations, convKey)
+	bot.Mu.Unlock()
+
+	// 0c. Intercept Input Mode (scoped by ConversationKey and routed strictly to pending.ClientID)
+	bot.Mu.Lock()
+	if pending, ok := bot.PendingInputs[convKey]; ok {
+		delete(bot.PendingInputs, convKey)
+		bot.Mu.Unlock()
+
+		if !pending.ExpiresAt.IsZero() && time.Now().After(pending.ExpiresAt) {
+			_ = bot.Send(c, "⏰ Input prompt expired. Please select the action again.")
+			return ShowMainMenu(bot, c)
+		}
+
 		bot.Mu.RLock()
-		clientID := bot.UserStates[c.Chat().ID]
-		pub := bot.Publishers[clientID]
+		pub := bot.Publishers[pending.ClientID]
+		comp := bot.DynamicMenus[pending.ClientID]
 		bot.Mu.RUnlock()
 
 		if pub != nil {
-			_ = pub.PublishCommand(context.Background(), pendingBtn.CommandType, pendingBtn.Payload, text)
-			// Return to current menu level after input
-			bot.Mu.RLock()
-			path := bot.UserPaths[c.Chat().ID]
-			comp := bot.DynamicMenus[clientID]
-			bot.Mu.RUnlock()
+			dispatchCtx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+			defer cancel()
+
+			if err := pub.PublishCommand(dispatchCtx, pending.Button.CommandType, pending.Button.Payload, text); err != nil {
+				return bot.Send(c, fmt.Sprintf("⚠️ Failed to send input: %v", err))
+			}
+			_ = pub.RequestRefresh(dispatchCtx)
+
 			if comp != nil {
-				return RenderMenu(bot, c, getMenuByPath(comp.Root, path))
+				return RenderMenu(bot, c, getMenuByPath(comp.Root, pending.Path))
 			}
 			return ShowMainMenu(bot, c)
 		}
@@ -253,8 +408,8 @@ func HandleDynamicText(bot *core.Bot, c tb.Context) error {
 	// 1. Navigation: Main Menu
 	if text == "📱 main menu" {
 		bot.Mu.Lock()
-		delete(bot.UserStates, c.Chat().ID)
-		delete(bot.UserPaths, c.Chat().ID)
+		delete(bot.UserStates, convKey)
+		delete(bot.UserPaths, convKey)
 		bot.Mu.Unlock()
 		return ShowMainMenu(bot, c)
 	}
@@ -262,52 +417,44 @@ func HandleDynamicText(bot *core.Bot, c tb.Context) error {
 	// 2. Navigation: Back
 	if strings.HasPrefix(text, "🔙 ") {
 		bot.Mu.Lock()
-		path := bot.UserPaths[c.Chat().ID]
+		path := bot.UserPaths[convKey]
 		if len(path) > 0 {
-			newPath := path[:len(path)-1]
-			bot.UserPaths[c.Chat().ID] = newPath
+			newPath := clonePath(path[:len(path)-1])
+			bot.UserPaths[convKey] = newPath
+			clientID := bot.UserStates[convKey]
+			comp := bot.DynamicMenus[clientID]
 			bot.Mu.Unlock()
 
-			bot.Mu.RLock()
-			clientID := bot.UserStates[c.Chat().ID]
-			comp := bot.DynamicMenus[clientID]
-			bot.Mu.RUnlock()
 			if comp != nil {
 				return RenderMenu(bot, c, getMenuByPath(comp.Root, newPath))
 			}
 		} else {
-			delete(bot.UserStates, c.Chat().ID)
-			delete(bot.UserPaths, c.Chat().ID)
+			delete(bot.UserStates, convKey)
+			delete(bot.UserPaths, convKey)
 			bot.Mu.Unlock()
 		}
 		return ShowMainMenu(bot, c)
 	}
 
-	// 3. Navigation: Manual Refresh
+	// 3. Navigation: Manual Refresh (no blocking time.Sleep)
 	if text == "🔄 refresh" {
 		bot.Mu.RLock()
-		clientID, inComp := bot.UserStates[c.Chat().ID]
-		path := bot.UserPaths[c.Chat().ID]
+		clientID, inComp := bot.UserStates[convKey]
+		path := clonePath(bot.UserPaths[convKey])
 		pub := bot.Publishers[clientID]
+		updatedComp := bot.DynamicMenus[clientID]
 		bot.Mu.RUnlock()
 
 		if inComp && pub != nil {
-			// Component Level Refresh
-			_ = pub.RequestRefresh(context.Background())
-			time.Sleep(200 * time.Millisecond)
-
-			bot.Mu.RLock()
-			updatedComp := bot.DynamicMenus[clientID]
-			bot.Mu.RUnlock()
+			dispatchCtx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+			defer cancel()
+			_ = pub.RequestRefresh(dispatchCtx)
 
 			if updatedComp != nil {
 				return RenderMenu(bot, c, getMenuByPath(updatedComp.Root, path))
 			}
-		} else {
-			// Main Menu Level Refresh
-			return ShowMainMenu(bot, c)
 		}
-		return nil
+		return ShowMainMenu(bot, c)
 	}
 
 	// 4. Navigation: Entry Points (Microservices)
@@ -332,46 +479,35 @@ func HandleDynamicText(bot *core.Bot, c tb.Context) error {
 
 		if found != nil {
 			bot.Mu.Lock()
-			bot.UserStates[c.Chat().ID] = targetID
-			bot.UserPaths[c.Chat().ID] = []string{}
+			bot.UserStates[convKey] = targetID
+			bot.UserPaths[convKey] = []string{}
 			bot.Mu.Unlock()
 			return RenderMenu(bot, c, found.Root)
 		}
 	}
 
-	// 5. Navigation: In-Menu Buttons
+	// 5. Navigation & Direct Action Dispatch: In-Menu Buttons
 	bot.Mu.RLock()
-	clientID, inComp := bot.UserStates[c.Chat().ID]
-	path := bot.UserPaths[c.Chat().ID]
+	clientID, inComp := bot.UserStates[convKey]
+	path := clonePath(bot.UserPaths[convKey])
 	comp, ok := bot.DynamicMenus[clientID]
-	pub := bot.Publishers[clientID]
 	bot.Mu.RUnlock()
 
-	if inComp && ok {
+	if inComp && ok && comp != nil {
 		currentMenu := getMenuByPath(comp.Root, path)
 		if currentMenu != nil {
 			btn := findButtonInMenu(currentMenu, text)
 			if btn != nil {
 				if btn.NextMenu != nil {
-					// Enter Sub-menu
+					newPath := append(clonePath(path), text)
 					bot.Mu.Lock()
-					bot.UserPaths[c.Chat().ID] = append(bot.UserPaths[c.Chat().ID], text)
-					newPath := bot.UserPaths[c.Chat().ID]
+					bot.UserPaths[convKey] = newPath
 					bot.Mu.Unlock()
 
 					return RenderMenu(bot, c, getMenuByPath(comp.Root, newPath))
 				}
 
-				bot.Mu.RLock()
-				fn, exists := bot.ActionMap[btn.CallbackData]
-				bot.Mu.RUnlock()
-				if exists {
-					err := fn(c)
-					if pub != nil {
-						_ = pub.RequestRefresh(context.Background())
-					}
-					return err
-				}
+				return executeButtonAction(bot, c, convKey, clientID, path, btn)
 			}
 		}
 	}
@@ -379,19 +515,21 @@ func HandleDynamicText(bot *core.Bot, c tb.Context) error {
 	return nil
 }
 
-// RenderMenu builds and displays a CommandMenu as a Reply Keyboard
+// -----------------------------------------------------------------------------
+
+// RenderMenu builds and displays a CommandMenu as a Reply Keyboard.
 func RenderMenu(bot *core.Bot, c tb.Context, m *models.CommandMenu) error {
 	if m == nil {
 		return bot.Send(c, "❌ Menu data unavailable. Please return to the main menu.")
 	}
 
+	convKey := getConvKey(c)
 	menuMarkup := &tb.ReplyMarkup{ResizeKeyboard: true}
 	var finalRows []tb.Row
 
 	// Create ONE button per row (vertical stack)
 	for _, row := range m.Rows {
 		for _, b := range row.Buttons {
-			// Append each button as an entirely new row slice
 			finalRows = append(finalRows, menuMarkup.Row(menuMarkup.Text(b.Label)))
 		}
 	}
@@ -399,7 +537,7 @@ func RenderMenu(bot *core.Bot, c tb.Context, m *models.CommandMenu) error {
 	// Calculate Dynamic Back Label
 	backLabel := "🔙 config"
 	bot.Mu.RLock()
-	if clientID, ok := bot.UserStates[c.Chat().ID]; ok {
+	if clientID, ok := bot.UserStates[convKey]; ok {
 		if comp, exists := bot.DynamicMenus[clientID]; exists {
 			if comp.Name != "Config Server" {
 				backLabel = fmt.Sprintf("🔙 %s", comp.Name)
@@ -419,7 +557,9 @@ func RenderMenu(bot *core.Bot, c tb.Context, m *models.CommandMenu) error {
 	return bot.Send(c, fmt.Sprintf("📍 %s", m.Title), menuMarkup)
 }
 
-// ShowMainMenu displays the dynamic top-level menu
+// -----------------------------------------------------------------------------
+
+// ShowMainMenu displays the dynamic top-level menu.
 func ShowMainMenu(bot *core.Bot, c tb.Context) error {
 	menuStart := &tb.ReplyMarkup{ResizeKeyboard: true}
 	var finalRows []tb.Row
@@ -437,9 +577,9 @@ func ShowMainMenu(bot *core.Bot, c tb.Context) error {
 
 	// B. Emergency Controls + refresh (grouped horizontally on ONE line)
 	finalRows = append(finalRows, menuStart.Row(
-		menuStart.Text("🆘 power off !"),
+		menuStart.Text(models.BtnPowerOff),
 		menuStart.Text("🔄 refresh"),
-		menuStart.Text("⏏️ close all positions"),
+		menuStart.Text(models.BtnCloseAll),
 	))
 
 	menuStart.Reply(finalRows...)

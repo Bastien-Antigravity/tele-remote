@@ -1,9 +1,27 @@
 package core
 
+/*
+ESSENTIAL PROCESS:
+Manages the Telegram Bot lifecycle, ChatID authorization middleware, non-blocking
+telemetry broadcast worker, and session-safe in-memory state registry for connected microservices.
+
+DATA FLOW:
+1. NewBot initializes the Telebot instance, state maps, and background telemetry worker.
+2. AuthMiddleware validates every incoming Telegram update against the configured ChatID before handler execution.
+3. OnTelemetry enqueues incoming component messages into a bounded channel (cap 256) for asynchronous Telegram delivery.
+4. OnDisconnect verifies publisher identity before removing component sessions and purges stale user navigation/input state.
+
+KEY PARAMETERS:
+- Cfg.ChatID: Authorized Telegram chat/user ID permitted to interact with the bot.
+- telemetryChan: Bounded 256-slot channel decoupling gRPC stream reads from Telegram HTTP calls.
+- UserStates / UserPaths / PendingInputs / PendingConfirmations: Per-ConversationKey interactive state maps.
+*/
+
 import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -11,33 +29,75 @@ import (
 	"github.com/Bastien-Antigravity/tele-remote/src/models"
 
 	unilog_ifaces "github.com/Bastien-Antigravity/universal-logger/src/interfaces"
+
 	tb "gopkg.in/telebot.v3"
 )
 
-// Config is a simple alias for the toolbox AppConfig in this context
+// -----------------------------------------------------------------------------
+
+// ConversationKey aliases models.ConversationKey for convenient access across packages.
+type ConversationKey = models.ConversationKey
+
+// PendingInput aliases models.PendingInput for convenient access across packages.
+type PendingInput = models.PendingInput
+
+// PendingConfirmation aliases models.PendingConfirmation for convenient access across packages.
+type PendingConfirmation = models.PendingConfirmation
+
+// -----------------------------------------------------------------------------
+
+// GetConvKey builds a scoped ConversationKey{ChatID, UserID} from a Telebot context,
+// falling back to UserID: 0 when c.Sender() is nil.
+func GetConvKey(c tb.Context) ConversationKey {
+	if c == nil {
+		return ConversationKey{}
+	}
+	var chatID, userID int64
+	if c.Chat() != nil {
+		chatID = c.Chat().ID
+	}
+	if c.Sender() != nil {
+		userID = c.Sender().ID
+	}
+	return ConversationKey{
+		ChatID: chatID,
+		UserID: userID,
+	}
+}
+
+// -----------------------------------------------------------------------------
+
+// Config holds the Telegram bot connection and authorization settings.
 type Config struct {
 	TelegramToken string
 	TelegramURL   string
 	ChatID        string
 }
 
-// Bot holds the telegram connection, config, and state references
+// -----------------------------------------------------------------------------
+
+// Bot holds the Telegram connection, config, non-blocking telemetry queue, and live state registry.
 type Bot struct {
 	B   *tb.Bot
 	Log unilog_ifaces.Logger
 	Cfg *Config
 
-	Mu            sync.RWMutex
-	DynamicMenus  map[string]*models.ComponentMenu
-	ActionMap     map[string]models.CallbackAction
-	CbCounter     int
-	Publishers    map[string]tele_interfaces.IPublisher
-	UserStates    map[int64]string                // chatID -> current component ID
-	PendingInputs map[int64]*models.CommandButton // chatID -> button waiting for text
-	UserPaths     map[int64][]string              // chatID -> breadcrumbs for "Back" button
+	Mu                   sync.RWMutex
+	DynamicMenus         map[string]*models.ComponentMenu
+	Publishers           map[string]tele_interfaces.IPublisher
+	UserStates           map[ConversationKey]string
+	PendingInputs        map[ConversationKey]PendingInput
+	PendingConfirmations map[ConversationKey]PendingConfirmation
+	UserPaths            map[ConversationKey][]string
+
+	telemetryChan chan string
+	stopTelemetry chan struct{}
+	stopOnce      sync.Once
 }
 
-// NewBot registers Telebot settings and initializes memory maps
+// -----------------------------------------------------------------------------
+
+// NewBot registers Telebot settings, initializes memory maps, and starts the background telemetry worker.
 func NewBot(token, url, chatID string, log unilog_ifaces.Logger) (*Bot, error) {
 	pref := tb.Settings{
 		Token:  token,
@@ -62,27 +122,57 @@ func NewBot(token, url, chatID string, log unilog_ifaces.Logger) (*Bot, error) {
 	}
 
 	bot := &Bot{
-		B:             b,
-		Log:           log,
-		Cfg:           cfg,
-		DynamicMenus:  make(map[string]*models.ComponentMenu),
-		ActionMap:     make(map[string]models.CallbackAction),
-		Publishers:    make(map[string]tele_interfaces.IPublisher),
-		UserStates:    make(map[int64]string),
-		PendingInputs: make(map[int64]*models.CommandButton),
-		UserPaths:     make(map[int64][]string),
+		B:                    b,
+		Log:                  log,
+		Cfg:                  cfg,
+		DynamicMenus:         make(map[string]*models.ComponentMenu),
+		Publishers:           make(map[string]tele_interfaces.IPublisher),
+		UserStates:           make(map[ConversationKey]string),
+		PendingInputs:        make(map[ConversationKey]PendingInput),
+		PendingConfirmations: make(map[ConversationKey]PendingConfirmation),
+		UserPaths:            make(map[ConversationKey][]string),
+		telemetryChan:        make(chan string, 256),
+		stopTelemetry:        make(chan struct{}),
 	}
+
+	go bot.runTelemetryWorker()
 
 	return bot, nil
 }
 
-// Start begins polling
-func (bot *Bot) Start(ctx context.Context) {
-	bot.B.Use(bot.LoggingMiddleware())
+// -----------------------------------------------------------------------------
 
+func (bot *Bot) runTelemetryWorker() {
+	for {
+		select {
+		case msg, ok := <-bot.telemetryChan:
+			if !ok {
+				return
+			}
+			bot.Broadcast(msg)
+		case <-bot.stopTelemetry:
+			for {
+				select {
+				case msg := <-bot.telemetryChan:
+					bot.Broadcast(msg)
+				default:
+					return
+				}
+			}
+		}
+	}
+}
+
+// -----------------------------------------------------------------------------
+
+// Start begins polling and shuts down cleanly when ctx is cancelled.
+func (bot *Bot) Start(ctx context.Context) {
 	go func() {
 		<-ctx.Done()
 		bot.Log.Info("Shutting down Telebot gracefully...")
+		bot.stopOnce.Do(func() {
+			close(bot.stopTelemetry)
+		})
 		bot.B.Stop()
 	}()
 
@@ -90,16 +180,62 @@ func (bot *Bot) Start(ctx context.Context) {
 	bot.B.Start()
 }
 
-// Broadcast sends a plain text message to the pre-configured ChatID
+// -----------------------------------------------------------------------------
+
+// IsAuthorized checks whether the incoming Telegram context matches the configured ChatID.
+func (bot *Bot) IsAuthorized(c tb.Context) bool {
+	if bot == nil || bot.Cfg == nil {
+		return false
+	}
+	allowed := strings.TrimSpace(bot.Cfg.ChatID)
+	if allowed == "" {
+		return false
+	}
+	if c == nil {
+		return false
+	}
+	if c.Chat() != nil && strconv.FormatInt(c.Chat().ID, 10) == allowed {
+		return true
+	}
+	if c.Sender() != nil && strconv.FormatInt(c.Sender().ID, 10) == allowed {
+		return true
+	}
+	return false
+}
+
+// -----------------------------------------------------------------------------
+
+// AuthMiddleware rejects any Telegram update from an unauthorized ChatID/Sender.
+func (bot *Bot) AuthMiddleware() tb.MiddlewareFunc {
+	return func(next tb.HandlerFunc) tb.HandlerFunc {
+		return func(c tb.Context) error {
+			if !bot.IsAuthorized(c) {
+				var chatID, userID int64
+				if c != nil && c.Chat() != nil {
+					chatID = c.Chat().ID
+				}
+				if c != nil && c.Sender() != nil {
+					userID = c.Sender().ID
+				}
+				bot.Log.Warning("Unauthorized Telegram access attemptRejected", "chat_id", chatID, "user_id", userID)
+				return bot.Send(c, "⛔ Unauthorized access.")
+			}
+			return next(c)
+		}
+	}
+}
+
+// -----------------------------------------------------------------------------
+
+// Broadcast sends a plain text message to the pre-configured ChatID.
 func (bot *Bot) Broadcast(msg string) {
-	if bot.Cfg.ChatID == "" {
+	if bot.Cfg == nil || strings.TrimSpace(bot.Cfg.ChatID) == "" {
 		bot.Log.Warning("Broadcast failed: TB_CHATID not set")
 		return
 	}
 
 	var chatID int64
-	var err error
-	if parsedID, parseErr := strconv.ParseInt(bot.Cfg.ChatID, 10, 64); parseErr == nil {
+	if parsedID, parseErr := strconv.ParseInt(strings.TrimSpace(bot.Cfg.ChatID), 10, 64); parseErr == nil {
 		chatID = parsedID
 	} else {
 		bot.Log.Error("Broadcast failed: invalid ChatID format (must be numeric)", "chat_id", bot.Cfg.ChatID, "err", parseErr)
@@ -108,45 +244,92 @@ func (bot *Bot) Broadcast(msg string) {
 
 	chat := &tb.Chat{ID: chatID}
 
-	_, err = bot.B.Send(chat, msg)
-	if err != nil {
+	if _, err := bot.B.Send(chat, msg); err != nil {
 		bot.Log.Error("failed to broadcast telemetry", "err", err)
 	}
 }
 
-// OnTelemetry handles incoming logs or events by broadcasting them to the admin chat
+// -----------------------------------------------------------------------------
+
+// OnTelemetry enqueues incoming logs or events non-blockingly for asynchronous delivery to the admin chat.
 func (bot *Bot) OnTelemetry(msg string) {
-	bot.Broadcast(msg)
+	select {
+	case bot.telemetryChan <- msg:
+	default:
+		bot.Log.Warning("Telemetry queue full; dropping message")
+	}
 }
 
-// OnDisconnect cleans up a component's state when it loses connection
-func (bot *Bot) OnDisconnect(clientID string) {
+// -----------------------------------------------------------------------------
+
+// OnDisconnect cleans up a component's state when it loses connection.
+// If pub is provided, the session is only removed if pub still matches the active publisher for clientID,
+// preventing a late disconnect from an older stream from deleting a newly reconnected session.
+func (bot *Bot) OnDisconnect(clientID string, pub ...tele_interfaces.IPublisher) {
 	bot.Mu.Lock()
 	defer bot.Mu.Unlock()
 
-	if _, ok := bot.DynamicMenus[clientID]; ok {
+	if len(pub) > 0 && pub[0] != nil {
+		activePub, exists := bot.Publishers[clientID]
+		if !exists || activePub != pub[0] {
+			bot.Log.Info("Ignoring stale disconnect for superseded component session", "client", clientID)
+			return
+		}
+	}
+
+	_, hasMenu := bot.DynamicMenus[clientID]
+	_, hasPub := bot.Publishers[clientID]
+	if hasMenu || hasPub {
 		bot.Log.Info("Removing session for disconnected component", "client", clientID)
 		delete(bot.DynamicMenus, clientID)
 		delete(bot.Publishers, clientID)
 	}
+
+	// Clean up any UserStates, UserPaths, and PendingInputs pointing to the disconnected clientID
+	for key, stateClientID := range bot.UserStates {
+		if stateClientID == clientID {
+			delete(bot.UserStates, key)
+			delete(bot.UserPaths, key)
+		}
+	}
+	for key, pending := range bot.PendingInputs {
+		if pending.ClientID == clientID {
+			delete(bot.PendingInputs, key)
+		}
+	}
 }
 
-// LoggingMiddleware intercepts all incoming messages for auditing
+// -----------------------------------------------------------------------------
+
+// LoggingMiddleware intercepts all incoming messages for auditing.
 func (bot *Bot) LoggingMiddleware() tb.MiddlewareFunc {
 	return func(next tb.HandlerFunc) tb.HandlerFunc {
 		return func(c tb.Context) error {
-			if c.Message() != nil {
-				bot.Log.Info("Received message", "chat_id", c.Chat().ID, "user", c.Sender().ID, "text", c.Text())
-			} else if c.Callback() != nil {
-				bot.Log.Info("Received callback", "chat_id", c.Chat().ID, "user", c.Sender().ID, "data", c.Callback().Data)
+			var chatID, userID int64
+			if c != nil && c.Chat() != nil {
+				chatID = c.Chat().ID
+			}
+			if c != nil && c.Sender() != nil {
+				userID = c.Sender().ID
+			}
+			if c != nil && c.Message() != nil {
+				bot.Log.Info("Received message", "chat_id", chatID, "user", userID, "text", c.Text())
+			} else if c != nil && c.Callback() != nil {
+				bot.Log.Info("Received callback", "chat_id", chatID, "user", userID, "data", c.Callback().Data)
 			}
 			return next(c)
 		}
 	}
 }
 
-// Send wraps tb.Context.Send to intercept and log all outgoing responses
+// -----------------------------------------------------------------------------
+
+// Send wraps tb.Context.Send to intercept and log all outgoing responses.
 func (bot *Bot) Send(c tb.Context, what interface{}, opts ...interface{}) error {
-	bot.Log.Info("Sending response", "chat_id", c.Chat().ID, "content", fmt.Sprintf("%v", what))
+	var chatID int64
+	if c != nil && c.Chat() != nil {
+		chatID = c.Chat().ID
+	}
+	bot.Log.Info("Sending response", "chat_id", chatID, "content", fmt.Sprintf("%v", what))
 	return c.Send(what, opts...)
 }

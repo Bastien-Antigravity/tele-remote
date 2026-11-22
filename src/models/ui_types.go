@@ -1,6 +1,24 @@
 package models
 
-import tb "gopkg.in/telebot.v3"
+/*
+ESSENTIAL PROCESS:
+Defines the in-memory UI menu tree models, conversation scoping keys, and pending
+interactive state structures for Tele-Remote.
+
+DATA FLOW:
+1. Microservices register JSON menu trees that deserialize into ComponentMenu, CommandMenu, CommandRow, and CommandButton.
+2. User interactions are scoped by ConversationKey{ChatID, UserID}.
+3. Multi-step input prompts and emergency command confirmations are tracked with expiration timestamps.
+
+KEY PARAMETERS:
+- ConversationKey: Composite key isolating per-user and per-chat interactive state.
+- PendingInput: Stores originating ClientID, target CommandButton, menu Path, and ExpiresAt.
+- PendingConfirmation: Tracks 2-step confirmation state and 60s expiration for critical commands.
+*/
+
+import (
+	"time"
+)
 
 // -----------------------------------------------------------------------------
 
@@ -13,19 +31,13 @@ type ComponentMenu struct {
 
 // -----------------------------------------------------------------------------
 
-// CallbackAction defines the function signature for an inline button trigger
-type CallbackAction func(ctx tb.Context) error
-
-// -----------------------------------------------------------------------------
-
 // CommandButton represents a single button in a row
 type CommandButton struct {
-	Label        string       `json:"label"`
-	CallbackData string       `json:"callback_data"` // id in the actionMap
-	NextMenu     *CommandMenu `json:"next_menu"`     // for sub-menus
-	CommandType  int32        `json:"command_type"`  // persisted for logic restore
-	Payload      string       `json:"payload"`       // persisted for logic restore
-	InputPrompt  string       `json:"input_prompt"`  // If set, ask user for text
+	Label       string       `json:"label"`
+	NextMenu    *CommandMenu `json:"next_menu"`    // for sub-menus
+	CommandType int32        `json:"command_type"` // command identifier dispatched to publisher
+	Payload     string       `json:"payload"`      // command argument payload
+	InputPrompt string       `json:"input_prompt"` // if set, ask user for text input
 }
 
 // -----------------------------------------------------------------------------
@@ -44,8 +56,42 @@ type CommandMenu struct {
 	Caption string       `json:"caption"`
 }
 
-// Standard Command Types
+// -----------------------------------------------------------------------------
+
+// ConversationKey scopes user navigation, pending inputs, and confirmations by chat and sender
+type ConversationKey struct {
+	ChatID int64
+	UserID int64
+}
+
+// -----------------------------------------------------------------------------
+
+// PendingInput tracks an in-flight text prompt bound to the originating component
+type PendingInput struct {
+	ClientID  string
+	Button    CommandButton
+	Path      []string
+	ExpiresAt time.Time
+}
+
+// -----------------------------------------------------------------------------
+
+// PendingConfirmation tracks a 2-step confirmation gate for critical fleet commands
+type PendingConfirmation struct {
+	CommandType int32
+	ExpiresAt   time.Time
+}
+
+// -----------------------------------------------------------------------------
+
+// Standard Command Types and Emergency Reply Keyboard Labels
 const (
 	CmdPowerOff int32 = 1
 	CmdStop     int32 = 2
+
+	BtnPowerOff        = "🆘 power off !"
+	BtnCloseAll        = "⏏️ close all positions"
+	BtnConfirmPowerOff = "✅ CONFIRM POWER OFF"
+	BtnConfirmCloseAll = "✅ CONFIRM CLOSE ALL POSITIONS"
+	BtnCancel          = "❌ Cancel"
 )

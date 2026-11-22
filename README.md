@@ -12,8 +12,8 @@ Tele-Remote is a central remote control and telemetry bridge that connects a clu
 
 It provides an efficient two-way communication channel:
 
-1. **Telemetry & Logging:** Connected components can stream logs, alerts, and structured messages to Tele-Remote, which routes them directly to a designated Telegram chat.
-2. **Command & Control:** You can issue commands via Telegram (e.g., *Power Off*, *Close All Positions*) which are instantly broadcast to all connected components.
+1. **Telemetry & Logging:** Connected components can stream logs, alerts, and structured messages to Tele-Remote, which queues them non-blockingly and routes them to a designated Telegram chat.
+2. **Command & Control:** You can issue commands via Telegram (e.g., *Power Off*, *Close All Positions*) which are protected by `ChatID` authorization and 2-step emergency confirmation before broadcasting to connected components.
 
 ## Communication Architecture (Pub/Sub)
 
@@ -21,7 +21,7 @@ Tele-Remote uses a transport-agnostic **IPublisher/ISubscriber** interface model
 
 - **gRPC (Streams):** Modern, high-performance, typed bidirectional streaming.
 
-Each connection is wrapped as an internal `interfaces.IPublisher`, ensuring that commands are routed precisely to the correct client.
+Each connection is wrapped as an internal `interfaces.IPublisher`, ensuring that commands are routed precisely to the correct client and that disconnects only clean up the session if the disconnecting stream's publisher matches the active session.
 
 ## Shared Infrastructure
 
@@ -63,17 +63,17 @@ go build -o bin/tele-remote ./cmd/tele-remote/main.go
 
 ## Available Telegram Commands
 
-When the user sends `/start` to the Bot, it replies with an interactive keyboard:
+All routes enforce `ChatID` authorization middleware (`AuthMiddleware`). When an authorized user sends `/start` to the Bot, it replies with an interactive Reply Keyboard:
 
-* **🆘 power off !** : Gracefully signals all connected components to power off.
-* **⏏️ close all positions** : Signals connected systems to halt strategies and close open positions.
+* **🆘 power off !** : Requests 2-step confirmation (`✅ CONFIRM POWER OFF` / `❌ Cancel`) before signaling all connected components to power off.
+* **⏏️ close all positions** : Requests 2-step confirmation (`✅ CONFIRM CLOSE ALL POSITIONS` / `❌ Cancel`) before signaling connected systems to halt strategies and close open positions.
 * **⚙️ [Component Name]** : Interactive control menus provided dynamically by the microservices themselves.
 
-### Dynamic UI (Optimistic UI with Background Sync)
+### Dynamic UI (Stateless In-Memory Live Registry)
 
-Tele-Remote operates a lightning-fast, stateless interface:
+Tele-Remote operates a stateless, in-memory live registry:
 
-1. **Instant Navigation:** When you click a menu button, the bot instantly renders the next screen using its local memory cache (zero network latency).
-2. **Background Sync:** Whenever a microservice's internal state changes (e.g., you update a setting), it immediately pushes a fresh UI definition to the bot in the background.
-3. **Manual Refresh:** A `🔄 refresh` button is always available in the footer to force a hard sync with the microservice if needed.
-4. **Input Prompts**: The bot can prompt for text (e.g., "Enter new IP") and route your reply back to the exact microservice Go function responsible for that setting.
+1. **Instant Navigation & Direct Button Dispatch:** Menu buttons are matched directly in the user's current submenu tree (scoped by `ConversationKey{ChatID, UserID}`) without unbounded callback maps.
+2. **Atomic Background Sync:** Microservices push fresh UI JSON trees in the background; payloads are validated before atomically updating the in-memory registry.
+3. **Manual Refresh:** A `🔄 refresh` button is always available in the footer to request an immediate sync from the microservice.
+4. **Scoped Input Prompts**: The bot prompts for text (e.g., "Enter new IP") and routes the reply directly back to the originating `ClientID` recorded on the `PendingInput`.

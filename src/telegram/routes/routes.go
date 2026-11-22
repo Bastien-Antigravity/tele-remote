@@ -1,8 +1,23 @@
 package routes
 
+/*
+ESSENTIAL PROCESS:
+Registers global Telebot middlewares (LoggingMiddleware and AuthMiddleware) and
+wires top-level Telegram command and reply-keyboard handlers.
+
+DATA FLOW:
+1. SetupRoutes attaches LoggingMiddleware and AuthMiddleware to the bot instance prior to route registration.
+2. /start resets the caller's scoped ConversationKey state and renders the main menu with the start banner.
+3. Critical emergency commands ("🆘 power off !" and "⏏️ close all positions") initiate a 2-step confirmation workflow rather than broadcasting immediately.
+4. Dynamic reply-keyboard text and confirmation responses are routed through ui.HandleDynamicText.
+
+KEY PARAMETERS:
+- bot: Initialized core.Bot instance holding state maps and Telebot router.
+- startImage: Embedded PNG banner sent on /start.
+*/
+
 import (
 	"bytes"
-	"context"
 	_ "embed"
 
 	"github.com/Bastien-Antigravity/tele-remote/src/models"
@@ -12,22 +27,31 @@ import (
 	tb "gopkg.in/telebot.v3"
 )
 
+// -----------------------------------------------------------------------------
+
 //go:embed assets/start.png
 var startImage []byte
 
-// SetupRoutes initializes all static handlers and maps fallback dynamic routing
+// -----------------------------------------------------------------------------
+
+// SetupRoutes initializes global middlewares, static handlers, and dynamic reply-keyboard routing.
 func SetupRoutes(bot *core.Bot) {
+	bot.B.Use(bot.LoggingMiddleware(), bot.AuthMiddleware())
+
 	m := &tb.ReplyMarkup{}
-	btnPowerOff := m.Text("🆘 power off !")
-	btnCloseAll := m.Text("⏏️ close all positions")
+	btnPowerOff := m.Text(models.BtnPowerOff)
+	btnCloseAll := m.Text(models.BtnCloseAll)
 
 	bot.B.Handle("/start", func(c tb.Context) error {
-		bot.Log.Info("User triggered /start", "user", c.Sender().ID)
+		convKey := core.GetConvKey(c)
+		bot.Log.Info("User triggered /start", "chat_id", convKey.ChatID, "user", convKey.UserID)
 
 		// Reset user state to main menu
 		bot.Mu.Lock()
-		delete(bot.UserStates, c.Chat().ID)
-		delete(bot.UserPaths, c.Chat().ID)
+		delete(bot.UserStates, convKey)
+		delete(bot.UserPaths, convKey)
+		delete(bot.PendingInputs, convKey)
+		delete(bot.PendingConfirmations, convKey)
 		bot.Mu.Unlock()
 
 		if len(startImage) != 0 {
@@ -39,27 +63,11 @@ func SetupRoutes(bot *core.Bot) {
 	})
 
 	bot.B.Handle(&btnPowerOff, func(c tb.Context) error {
-		bot.Log.Info("PowerOff triggered via Telegram")
-
-		bot.Mu.RLock()
-		for _, pub := range bot.Publishers {
-			_ = pub.PublishCommand(context.Background(), int32(models.CmdPowerOff), "", "")
-		}
-		bot.Mu.RUnlock()
-
-		return bot.Send(c, "🆘 Powering off all components...")
+		return ui.RequestEmergencyConfirmation(bot, c, models.CmdPowerOff)
 	})
 
 	bot.B.Handle(&btnCloseAll, func(c tb.Context) error {
-		bot.Log.Info("CloseAllPositions triggered via Telegram")
-
-		bot.Mu.RLock()
-		for _, pub := range bot.Publishers {
-			_ = pub.PublishCommand(context.Background(), int32(models.CmdStop), "", "")
-		}
-		bot.Mu.RUnlock()
-
-		return bot.Send(c, "🛑 Calling 'stop' on all components...")
+		return ui.RequestEmergencyConfirmation(bot, c, models.CmdStop)
 	})
 
 	// Global Handler for dynamic Reply buttons
