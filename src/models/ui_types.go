@@ -24,9 +24,12 @@ import (
 
 // ComponentMenu holds the structured tree for a single registered component
 type ComponentMenu struct {
-	Name     string       `json:"name"`
-	ClientID string       `json:"client_id"`
-	Root     *CommandMenu `json:"root"`
+	Name         string       `json:"name"`
+	ClientID     string       `json:"client_id"`
+	Priority     int          `json:"priority"`
+	Revision     uint64       `json:"revision"`
+	RegisteredAt time.Time    `json:"registered_at"`
+	Root         *CommandMenu `json:"root"`
 }
 
 // -----------------------------------------------------------------------------
@@ -34,6 +37,7 @@ type ComponentMenu struct {
 // CommandButton represents a single button in a row
 type CommandButton struct {
 	Label       string       `json:"label"`
+	Order       int          `json:"order,omitempty"`
 	NextMenu    *CommandMenu `json:"next_menu"`    // for sub-menus
 	CommandType int32        `json:"command_type"` // command identifier dispatched to publisher
 	Payload     string       `json:"payload"`      // command argument payload
@@ -44,6 +48,7 @@ type CommandButton struct {
 
 // CommandRow represents a single row of buttons in a menu
 type CommandRow struct {
+	Order   int             `json:"order,omitempty"`
 	Buttons []CommandButton `json:"buttons"`
 }
 
@@ -68,10 +73,11 @@ type ConversationKey struct {
 
 // PendingInput tracks an in-flight text prompt bound to the originating component
 type PendingInput struct {
-	ClientID  string
-	Button    CommandButton
-	Path      []string
-	ExpiresAt time.Time
+	ClientID     string
+	MenuRevision uint64
+	Button       CommandButton
+	Path         []string
+	ExpiresAt    time.Time
 }
 
 // -----------------------------------------------------------------------------

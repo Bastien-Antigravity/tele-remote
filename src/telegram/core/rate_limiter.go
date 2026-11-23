@@ -26,9 +26,21 @@ import (
 
 // -----------------------------------------------------------------------------
 
+const (
+	// DefaultBurstLimit allows up to 60 requests per window for high-speed UI interaction.
+	DefaultBurstLimit = 60
+	// DefaultRateWindow is the sliding window duration.
+	DefaultRateWindow = 2 * time.Second
+	// DefaultRateCooldown is the minimum interval between throttle warnings sent to the user.
+	DefaultRateCooldown = 3 * time.Second
+	// MaxTrackedClients caps the in-memory rate limiter client map to prevent unbounded growth.
+	MaxTrackedClients = 4096
+)
+
 type clientBucket struct {
 	timestamps  []time.Time
 	lastWarning time.Time
+	lastSeen    time.Time
 }
 
 // -----------------------------------------------------------------------------
@@ -48,13 +60,13 @@ type RateLimiter struct {
 // NewRateLimiter instantiates a sliding-window rate limiter with sensible defaults.
 func NewRateLimiter(maxRequests int, window, cooldown time.Duration) *RateLimiter {
 	if maxRequests <= 0 {
-		maxRequests = 5
+		maxRequests = DefaultBurstLimit
 	}
 	if window <= 0 {
-		window = 2 * time.Second
+		window = DefaultRateWindow
 	}
 	if cooldown <= 0 {
-		cooldown = 3 * time.Second
+		cooldown = DefaultRateCooldown
 	}
 	return &RateLimiter{
 		maxRequests: maxRequests,
@@ -96,11 +108,34 @@ func (rl *RateLimiter) Allow(key ConversationKey) (bool, bool) {
 
 	bucket, exists := rl.clients[key]
 	if !exists {
+		if len(rl.clients) >= MaxTrackedClients {
+			for k, b := range rl.clients {
+				if now.Sub(b.lastSeen) > 2*rl.window && now.Sub(b.lastWarning) > 2*rl.window {
+					delete(rl.clients, k)
+				}
+			}
+			if len(rl.clients) >= MaxTrackedClients {
+				var oldestKey ConversationKey
+				var oldestTime time.Time
+				first := true
+				for k, b := range rl.clients {
+					if first || b.lastSeen.Before(oldestTime) {
+						oldestKey = k
+						oldestTime = b.lastSeen
+						first = false
+					}
+				}
+				if !first {
+					delete(rl.clients, oldestKey)
+				}
+			}
+		}
 		bucket = &clientBucket{
 			timestamps: make([]time.Time, 0, rl.maxRequests),
 		}
 		rl.clients[key] = bucket
 	}
+	bucket.lastSeen = now
 
 	// Evict timestamps outside the sliding window
 	threshold := now.Add(-rl.window)
@@ -162,3 +197,4 @@ func (bot *Bot) RateLimitMiddleware() tb.MiddlewareFunc {
 		}
 	}
 }
+

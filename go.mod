@@ -35,11 +35,3 @@ require (
 )
 
 replace github.com/spf13/viper => github.com/spf13/viper v1.21.0
-
-replace (
-	github.com/Bastien-Antigravity/distributed-config => ../distributed-config
-	github.com/Bastien-Antigravity/flexible-logger => ../flexible-logger
-	github.com/Bastien-Antigravity/microservice-toolbox => ../microservice-toolbox
-	github.com/Bastien-Antigravity/safe-socket => ../safe-socket
-	github.com/Bastien-Antigravity/universal-logger => ../universal-logger
-)

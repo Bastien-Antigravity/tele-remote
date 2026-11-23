@@ -16,7 +16,7 @@ func TestBuildTeleRemoteContracts(t *testing.T) {
 	if len(contracts[0].Operations) == 0 || contracts[0].Operations[0].Kind != "BIDI_STREAM" {
 		t.Fatalf("expected BIDI_STREAM Connect operation, got: %+v", contracts[0].Operations)
 	}
-	if contracts[1].ID != "telegram-bot-api" || len(contracts[1].Operations) < 4 {
+	if contracts[1].ID != "telegram-bot-api" || len(contracts[1].Operations) < 3 {
 		t.Fatalf("unexpected telegram contract: %+v", contracts[1])
 	}
 }

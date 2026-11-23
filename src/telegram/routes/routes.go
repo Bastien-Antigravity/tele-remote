@@ -8,7 +8,7 @@ wires top-level Telegram command and reply-keyboard handlers.
 DATA FLOW:
 1. SetupRoutes attaches LoggingMiddleware and AuthMiddleware to the bot instance prior to route registration.
 2. /start resets the caller's scoped ConversationKey state and renders the main menu with the start banner.
-3. Critical emergency commands ("🆘 power off !" and "⏏️ close all positions") initiate a 2-step confirmation workflow rather than broadcasting immediately.
+3. Critical emergency command ("🆘 power off !") initiates a 2-step confirmation workflow rather than broadcasting immediately.
 4. Dynamic reply-keyboard text and confirmation responses are routed through ui.HandleDynamicText.
 
 KEY PARAMETERS:
@@ -36,11 +36,10 @@ var startImage []byte
 
 // SetupRoutes initializes global middlewares, static handlers, and dynamic reply-keyboard routing.
 func SetupRoutes(bot *core.Bot) {
-	bot.B.Use(bot.RateLimitMiddleware(), bot.LoggingMiddleware(), bot.AuthMiddleware())
+	bot.B.Use(bot.RateLimitMiddleware(), bot.AuthMiddleware(), bot.LoggingMiddleware())
 
 	m := &tb.ReplyMarkup{}
 	btnPowerOff := m.Text(models.BtnPowerOff)
-	btnCloseAll := m.Text(models.BtnCloseAll)
 
 	bot.B.Handle("/start", func(c tb.Context) error {
 		convKey := core.GetConvKey(c)
@@ -64,10 +63,6 @@ func SetupRoutes(bot *core.Bot) {
 
 	bot.B.Handle(&btnPowerOff, func(c tb.Context) error {
 		return ui.RequestEmergencyConfirmation(bot, c, models.CmdPowerOff)
-	})
-
-	bot.B.Handle(&btnCloseAll, func(c tb.Context) error {
-		return ui.RequestEmergencyConfirmation(bot, c, models.CmdStop)
 	})
 
 	// Global Handler for dynamic Reply buttons

@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -71,10 +72,15 @@ type MockLogger struct {
 	unilog_ifaces.Logger
 	mu       sync.Mutex
 	warnings []string
+	infos    []string
 }
 
-func (m *MockLogger) Debug(f string, a ...any)   {}
-func (m *MockLogger) Info(f string, a ...any)    {}
+func (m *MockLogger) Debug(f string, a ...any) {}
+func (m *MockLogger) Info(f string, a ...any) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.infos = append(m.infos, fmt.Sprintf("%s %v", f, a))
+}
 func (m *MockLogger) Warning(f string, a ...any) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -210,7 +216,7 @@ func TestBot_AuthMiddlewareRejectsUnauthorizedChatID(t *testing.T) {
 	defer ms.Close()
 
 	logger := &MockLogger{}
-	bot, err := NewBot("12345:TEST_TOKEN", ms.server.URL, "12345678, 87654321", logger, "99990000")
+	bot, err := NewBot("12345:TEST_TOKEN", ms.server.URL, "12345678, 87654321, -10099999", logger, "99990000")
 	if err != nil {
 		t.Fatalf("Failed to init bot: %v", err)
 	}
@@ -222,7 +228,7 @@ func TestBot_AuthMiddlewareRejectsUnauthorizedChatID(t *testing.T) {
 		return nil
 	})
 
-	// 1. Unauthorized ChatID & Sender must be rejected
+	// 1. Unauthorized ChatID & Sender must be rejected with "⛔ Unauthorized access."
 	unauthCtx := newFakeContext(99999999, 88888888, "/start")
 	if err := protectedHandler(unauthCtx); err != nil {
 		t.Fatalf("Unexpected error from AuthMiddleware: %v", err)
@@ -230,33 +236,54 @@ func TestBot_AuthMiddlewareRejectsUnauthorizedChatID(t *testing.T) {
 	if handlerCalled {
 		t.Fatal("Protected handler must NOT be executed for unauthorized ChatID")
 	}
-	if len(unauthCtx.sentMsgs) != 1 || !strings.HasPrefix(unauthCtx.sentMsgs[0], "⛔ Unauthorized access.") {
-		t.Fatalf("Expected unauthorized response starting with '⛔ Unauthorized access.', got %v", unauthCtx.sentMsgs)
-	}
-	if !strings.Contains(unauthCtx.sentMsgs[0], "88888888") {
-		t.Fatalf("Expected unauthorized response to mention User ID 88888888, got %s", unauthCtx.sentMsgs[0])
+	if len(unauthCtx.sentMsgs) != 1 || unauthCtx.sentMsgs[0] != "⛔ Unauthorized access." {
+		t.Fatalf("Expected unauthorized response '⛔ Unauthorized access.', got %v", unauthCtx.sentMsgs)
 	}
 
-	// 2. Authorized ChatID (first from comma list) must pass through to handler
-	authCtx1 := newFakeContext(12345678, 111, "/start")
-	if err := protectedHandler(authCtx1); err != nil {
-		t.Fatalf("Unexpected error for authorized ChatID: %v", err)
-	}
-	if !handlerCalled {
-		t.Fatal("Protected handler must be executed for authorized ChatID 12345678")
-	}
-
-	// 3. Authorized Sender from second item in comma list
+	// 2. Authorized private user (chatID=12345678, userID=12345678) must pass
 	handlerCalled = false
-	authCtx2 := newFakeContext(999, 87654321, "/start")
-	if err := protectedHandler(authCtx2); err != nil {
-		t.Fatalf("Unexpected error for authorized Sender: %v", err)
+	authCtx1 := newFakeContext(12345678, 12345678, "/start")
+	if err := protectedHandler(authCtx1); err != nil {
+		t.Fatalf("Unexpected error for authorized private user: %v", err)
 	}
 	if !handlerCalled {
-		t.Fatal("Protected handler must be executed for authorized Sender 87654321")
+		t.Fatal("Protected handler must be executed for authorized private user 12345678")
 	}
 
-	// 4. Authorized ID from AllowedUsers
+	// 3. Authorized sender in a group (chatID=-10055555, userID=87654321) must pass
+	handlerCalled = false
+	authCtx2 := newFakeContext(-10055555, 87654321, "/start")
+	if err := protectedHandler(authCtx2); err != nil {
+		t.Fatalf("Unexpected error for authorized group sender: %v", err)
+	}
+	if !handlerCalled {
+		t.Fatal("Protected handler must be executed for authorized Sender 87654321 in group -10055555")
+	}
+
+	// 4. Unauthorized sender (userID=111) inside an authorized group chat (chatID=-10099999) must be REJECTED
+	handlerCalled = false
+	unauthGroupCtx := newFakeContext(-10099999, 111, "/start")
+	if err := protectedHandler(unauthGroupCtx); err != nil {
+		t.Fatalf("Unexpected error for unauthorized group sender: %v", err)
+	}
+	if handlerCalled {
+		t.Fatal("Protected handler must NOT be executed for unauthorized sender inside authorized group chat")
+	}
+	if len(unauthGroupCtx.sentMsgs) != 1 || unauthGroupCtx.sentMsgs[0] != "⛔ Unauthorized access." {
+		t.Fatalf("Expected unauthorized response '⛔ Unauthorized access.', got %v", unauthGroupCtx.sentMsgs)
+	}
+
+	// 5. Authorized private chat when userID=0 (Sender() == nil, chatID=12345678) must pass
+	handlerCalled = false
+	authNilSenderCtx := newFakeContext(12345678, 0, "/start")
+	if err := protectedHandler(authNilSenderCtx); err != nil {
+		t.Fatalf("Unexpected error for authorized private chat with nil Sender: %v", err)
+	}
+	if !handlerCalled {
+		t.Fatal("Protected handler must be executed for authorized private chat 12345678 with nil Sender")
+	}
+
+	// 6. Authorized ID from AllowedUsers
 	handlerCalled = false
 	authCtx3 := newFakeContext(999, 99990000, "/start")
 	if err := protectedHandler(authCtx3); err != nil {
@@ -319,5 +346,88 @@ func TestBot_RateLimitMiddleware(t *testing.T) {
 	}
 	if len(ctx.sentMsgs) != msgCountBefore {
 		t.Fatalf("Flooded request in cooldown should not send another warning message")
+	}
+}
+
+// -----------------------------------------------------------------------------
+
+func TestBot_LoggingMiddlewareRedactsPendingInput(t *testing.T) {
+	ms := newMockTelegramServer()
+	defer ms.Close()
+
+	logger := &MockLogger{}
+	bot, err := NewBot("12345:TEST_TOKEN", ms.server.URL, "12345678", logger)
+	if err != nil {
+		t.Fatalf("Failed to init bot: %v", err)
+	}
+
+	convKey := ConversationKey{ChatID: 12345678, UserID: 12345678}
+	bot.Mu.Lock()
+	bot.PendingInputs[convKey] = PendingInput{ClientID: "auth-service"}
+	bot.Mu.Unlock()
+
+	mw := bot.LoggingMiddleware()
+	handler := mw(func(c tb.Context) error { return nil })
+
+	secretText := "super-secret-api-key-123"
+	if err := handler(newFakeContext(12345678, 12345678, secretText)); err != nil {
+		t.Fatalf("Unexpected error from LoggingMiddleware (pending): %v", err)
+	}
+
+	bot.Mu.Lock()
+	delete(bot.PendingInputs, convKey)
+	bot.Mu.Unlock()
+
+	if err := handler(newFakeContext(12345678, 12345678, "/status")); err != nil {
+		t.Fatalf("Unexpected error from LoggingMiddleware (normal): %v", err)
+	}
+
+	logger.mu.Lock()
+	defer logger.mu.Unlock()
+	if len(logger.infos) != 2 {
+		t.Fatalf("Expected 2 info logs, got %d", len(logger.infos))
+	}
+	if strings.Contains(logger.infos[0], secretText) {
+		t.Fatalf("Pending input secret must NOT be logged, got %q", logger.infos[0])
+	}
+	if !strings.Contains(logger.infos[0], "[REDACTED_PENDING_INPUT]") {
+		t.Fatalf("Expected [REDACTED_PENDING_INPUT] in log, got %q", logger.infos[0])
+	}
+	if !strings.Contains(logger.infos[1], "/status") {
+		t.Fatalf("Expected normal command '/status' in log, got %q", logger.infos[1])
+	}
+}
+
+// -----------------------------------------------------------------------------
+
+func TestSplitTelegramMessage_ChunksLongMessages(t *testing.T) {
+	if got := splitTelegramMessage("", 10); len(got) != 1 || got[0] != "" {
+		t.Fatalf("Expected single empty string for empty input, got %v", got)
+	}
+
+	if got := splitTelegramMessage("short", 10); len(got) != 1 || got[0] != "short" {
+		t.Fatalf("Expected single chunk for short input, got %v", got)
+	}
+
+	// Should split on newline when newline is after maxLen/2
+	nlMsg := "line12\nline2-ext"
+	nlChunks := splitTelegramMessage(nlMsg, 10)
+	if len(nlChunks) != 2 || nlChunks[0] != "line12\n" || nlChunks[1] != "line2-ext" {
+		t.Fatalf("Expected newline-aligned split [\"line12\\n\", \"line2-ext\"], got %q", nlChunks)
+	}
+
+	// Long message without newlines should split cleanly at maxLen runes
+	longMsg := strings.Repeat("a", maxTelegramMessageLen*2+123)
+	chunks := splitTelegramMessage(longMsg, maxTelegramMessageLen)
+	if len(chunks) != 3 {
+		t.Fatalf("Expected 3 chunks, got %d", len(chunks))
+	}
+	for i, chunk := range chunks {
+		if len([]rune(chunk)) > maxTelegramMessageLen {
+			t.Fatalf("Chunk %d exceeded max length %d: got %d", i, maxTelegramMessageLen, len([]rune(chunk)))
+		}
+	}
+	if strings.Join(chunks, "") != longMsg {
+		t.Fatal("Rejoined chunks do not match original message")
 	}
 }

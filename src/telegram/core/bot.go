@@ -167,7 +167,7 @@ func NewBot(token, url, chatID string, log unilog_ifaces.Logger, allowedUsers ..
 		B:                    b,
 		Log:                  log,
 		Cfg:                  cfg,
-		Limiter:              NewRateLimiter(5, 2*time.Second, 3*time.Second),
+		Limiter:              NewRateLimiter(DefaultBurstLimit, DefaultRateWindow, DefaultRateCooldown),
 		DynamicMenus:         make(map[string]*models.ComponentMenu),
 		Publishers:           make(map[string]tele_interfaces.IPublisher),
 		UserStates:           make(map[ConversationKey]string),
@@ -225,25 +225,64 @@ func (bot *Bot) Start(ctx context.Context) {
 
 // -----------------------------------------------------------------------------
 
-// IsAuthorized checks whether the incoming Telegram context matches any configured ChatID or AllowedUsers.
-func (bot *Bot) IsAuthorized(c tb.Context) bool {
-	if bot == nil || bot.Cfg == nil || len(bot.Cfg.AuthorizedIDs) == 0 {
-		return false
+const maxTelegramMessageLen = 4000
+
+// splitTelegramMessage splits a message into chunks of at most maxLen runes,
+// preferring newline boundaries in the second half of each window.
+func splitTelegramMessage(msg string, maxLen int) []string {
+	if msg == "" || maxLen <= 0 {
+		return []string{msg}
 	}
-	if c == nil {
+
+	runes := []rune(msg)
+	if len(runes) <= maxLen {
+		return []string{msg}
+	}
+
+	var chunks []string
+	for len(runes) > maxLen {
+		splitAt := maxLen
+		for i := maxLen - 1; i > maxLen/2; i-- {
+			if runes[i] == '\n' {
+				splitAt = i + 1
+				break
+			}
+		}
+		chunks = append(chunks, string(runes[:splitAt]))
+		runes = runes[splitAt:]
+	}
+	if len(runes) > 0 {
+		chunks = append(chunks, string(runes))
+	}
+	return chunks
+}
+
+// -----------------------------------------------------------------------------
+
+// IsAuthorized checks whether the incoming Telegram sender (or private chat when sender is nil)
+// matches any configured ChatID or AllowedUsers.
+func (bot *Bot) IsAuthorized(c tb.Context) bool {
+	if bot == nil || bot.Cfg == nil || len(bot.Cfg.AuthorizedIDs) == 0 || c == nil {
 		return false
 	}
 	if c.Sender() != nil {
-		if _, ok := bot.Cfg.AuthorizedIDs[c.Sender().ID]; ok {
-			return true
-		}
+		_, ok := bot.Cfg.AuthorizedIDs[c.Sender().ID]
+		return ok
 	}
-	if c.Chat() != nil {
-		if _, ok := bot.Cfg.AuthorizedIDs[c.Chat().ID]; ok {
-			return true
-		}
+	if c.Chat() != nil && c.Chat().ID > 0 {
+		_, ok := bot.Cfg.AuthorizedIDs[c.Chat().ID]
+		return ok
 	}
 	return false
+}
+
+// -----------------------------------------------------------------------------
+
+// SetBurstLimit dynamically updates the RateLimiter's maximum burst threshold.
+func (bot *Bot) SetBurstLimit(limit int) {
+	if bot != nil && limit > 0 {
+		bot.Limiter = NewRateLimiter(limit, DefaultRateWindow, DefaultRateCooldown)
+	}
 }
 
 // -----------------------------------------------------------------------------
@@ -264,12 +303,7 @@ func (bot *Bot) AuthMiddleware() tb.MiddlewareFunc {
 				}
 				bot.Log.Warning("Unauthorized Telegram access attempt rejected",
 					"chat_id", chatID, "user_id", userID, "username", username)
-
-				errMsg := "⛔ Unauthorized access."
-				if userID != 0 || chatID != 0 {
-					errMsg = fmt.Sprintf("⛔ Unauthorized access.\n\nYour Telegram User ID: %d (Chat ID: %d)\nPlease add your ID to TR_CHATID or TR_ALLOWED_USERS in configuration.", userID, chatID)
-				}
-				return bot.Send(c, errMsg)
+				return bot.Send(c, "⛔ Unauthorized access.")
 			}
 			return next(c)
 		}
@@ -278,17 +312,20 @@ func (bot *Bot) AuthMiddleware() tb.MiddlewareFunc {
 
 // -----------------------------------------------------------------------------
 
-// Broadcast sends a plain text message to all pre-configured ChatIDs.
+// Broadcast sends a plain text message to all pre-configured ChatIDs, chunking long payloads.
 func (bot *Bot) Broadcast(msg string) {
 	if bot.Cfg == nil || len(bot.Cfg.BroadcastIDs) == 0 {
 		bot.Log.Warning("Broadcast failed: no authorized broadcast chat IDs configured")
 		return
 	}
 
+	chunks := splitTelegramMessage(msg, maxTelegramMessageLen)
 	for _, chatID := range bot.Cfg.BroadcastIDs {
 		chat := &tb.Chat{ID: chatID}
-		if _, err := bot.B.Send(chat, msg); err != nil {
-			bot.Log.Error("Failed to broadcast telemetry to chat", "chat_id", chatID, "err", err)
+		for _, chunk := range chunks {
+			if _, err := bot.B.Send(chat, chunk); err != nil {
+				bot.Log.Error("Failed to broadcast telemetry to chat", "chat_id", chatID, "err", err)
+			}
 		}
 	}
 }
@@ -357,7 +394,16 @@ func (bot *Bot) LoggingMiddleware() tb.MiddlewareFunc {
 				userID = c.Sender().ID
 			}
 			if c != nil && c.Message() != nil {
-				bot.Log.Info("Received message", "chat_id", chatID, "user", userID, "text", c.Text())
+				convKey := GetConvKey(c)
+				bot.Mu.RLock()
+				_, hasPending := bot.PendingInputs[convKey]
+				bot.Mu.RUnlock()
+
+				loggedText := c.Text()
+				if hasPending {
+					loggedText = "[REDACTED_PENDING_INPUT]"
+				}
+				bot.Log.Info("Received message", "chat_id", chatID, "user", userID, "text", loggedText)
 			} else if c != nil && c.Callback() != nil {
 				bot.Log.Info("Received callback", "chat_id", chatID, "user", userID, "data", c.Callback().Data)
 			}

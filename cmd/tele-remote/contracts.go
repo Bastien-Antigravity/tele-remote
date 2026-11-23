@@ -1,11 +1,30 @@
 package main
 
+/*
+ESSENTIAL PROCESS:
+Builds the service's ExchangeContract metadata for publication to web-interface
+via microservice-toolbox/go/pkg/spec, reflecting both the gRPC bidirectional
+control stream and the Telegram Bot API gateway.
+
+DATA FLOW:
+1. Extracts protobuf service operations from embedded TeleRemoteProtoSchema.
+2. Falls back to static Connect BIDI_STREAM metadata if schema parsing yields empty.
+3. Returns ExchangeContract entries for grpc-bidi-stream and telegram-bot-api.
+
+KEY PARAMETERS:
+- grpcAddr: Configured gRPC listen address displayed in contract metadata.
+- botURL: Configured Telegram Bot API endpoint URL.
+- bindPort: TCP port bound by the gRPC subscriber listener.
+*/
+
 import (
 	"strings"
 
 	toolbox_spec "github.com/Bastien-Antigravity/microservice-toolbox/go/pkg/spec"
 	"github.com/Bastien-Antigravity/tele-remote/src/grpc_control"
 )
+
+// -----------------------------------------------------------------------------
 
 func buildTeleRemoteContracts(grpcAddr, botURL string, bindPort int) []toolbox_spec.ExchangeContract {
 	grpcOps := toolbox_spec.ExtractProtoTextOperations(grpc_control.TeleRemoteProtoSchema)
@@ -33,7 +52,7 @@ func buildTeleRemoteContracts(grpcAddr, botURL string, bindPort int) []toolbox_s
 			Address:   toolbox_spec.DisplayAddress(grpcAddr),
 			Port:      bindPort,
 			Framing:   "teleremote.TeleRemoteService/Connect (ComponentMessage <-> BotCommand)",
-			Auth:      "Component identity registered on initial stream frame",
+			Auth:      "Optional runtime-toggleable TLS/mTLS (with global private key fallback) + optional x-tele-auth token + strict first-frame component registration gate",
 			Summary:   "Full-duplex gRPC stream allowing ecosystem microservices to push dynamic menu trees & telemetry and receive Telegram interactive BotCommand invocations.",
 			Source:    "tele-remote/src/grpc_control/teleremote.proto (go:embed)",
 			Peers: []toolbox_spec.ContractPeer{
@@ -65,7 +84,6 @@ func buildTeleRemoteContracts(grpcAddr, botURL string, bindPort int) []toolbox_s
 			Operations: []toolbox_spec.ContractOperation{
 				{Name: "CmdStart", Kind: "COMMAND", Target: "/start", Output: "Reply keyboard + connected component buttons", Description: "Renders interactive control menu root"},
 				{Name: "PowerOff", Kind: "BUTTON", Target: "POWER_OFF (1)", Output: "BotCommand { CommandType: POWER_OFF }", Description: "Broadcasts emergency power-off command across connected clients"},
-				{Name: "CloseAll", Kind: "BUTTON", Target: "CLOSE_ALL_POSITIONS (2)", Output: "BotCommand { CommandType: CLOSE_ALL_POSITIONS }", Description: "Broadcasts position flatten command"},
 				{Name: "DynamicAction", Kind: "CALLBACK", Target: "tb.OnText / tb.OnCallback", Input: "Operator text or inline callback", Output: "BotCommand { CUSTOM_COMMAND (99), custom_payload, input }", Description: "Routes dynamic microservice submenu action or input prompt"},
 			},
 			SchemaFormat: "wire",
@@ -73,7 +91,6 @@ func buildTeleRemoteContracts(grpcAddr, botURL string, bindPort int) []toolbox_s
 				"Telegram Command Handlers (tele-remote/src/telegram/routes/routes.go):",
 				"  /start       -> Render connected component root buttons",
 				"  Power Off    -> Dispatches BotCommand.POWER_OFF (1)",
-				"  Close All    -> Dispatches BotCommand.CLOSE_ALL_POSITIONS (2)",
 				"  tb.OnText    -> Routes reply-keyboard & pending input prompts",
 				"  tb.OnCallback-> Executes ComponentMenu dynamic callback IDs via gRPC publisher",
 			}, "\n"),

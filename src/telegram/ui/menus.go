@@ -19,7 +19,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Bastien-Antigravity/tele-remote/src/interfaces"
@@ -35,7 +38,17 @@ const (
 	emergencyConfirmTTL = 60 * time.Second
 	pendingInputTTL     = 5 * time.Minute
 	commandTimeout      = 10 * time.Second
+	maxMenuJSONBytes    = 65536
+	maxMenuDepth        = 8
 )
+
+// -----------------------------------------------------------------------------
+
+type broadcastTarget struct {
+	clientID string
+	name     string
+	pub      interfaces.IPublisher
+}
 
 // -----------------------------------------------------------------------------
 
@@ -56,6 +69,88 @@ func clonePath(path []string) []string {
 
 // -----------------------------------------------------------------------------
 
+func defaultComponentPriority(name string) int {
+	n := strings.ToLower(strings.TrimSpace(name))
+	switch {
+	case strings.Contains(n, "web"):
+		return 5
+	case strings.Contains(n, "squad"):
+		return 10
+	case strings.Contains(n, "watchdog"):
+		return 15
+	case strings.Contains(n, "config"):
+		return 20
+	case strings.Contains(n, "log"):
+		return 30
+	case strings.Contains(n, "notif"):
+		return 35
+	case strings.Contains(n, "tele"):
+		return 40
+	case strings.Contains(n, "rag"):
+		return 45
+	default:
+		return 100
+	}
+}
+
+// -----------------------------------------------------------------------------
+
+func extractNumericOrder(data map[string]interface{}) int {
+	if data == nil {
+		return 0
+	}
+	for _, key := range []string{"priority", "order", "id"} {
+		raw, exists := data[key]
+		if !exists || raw == nil {
+			continue
+		}
+		switch v := raw.(type) {
+		case float64:
+			if int(v) > 0 {
+				return int(v)
+			}
+		case int:
+			if v > 0 {
+				return v
+			}
+		case string:
+			if parsed, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && parsed > 0 {
+				return parsed
+			}
+		}
+	}
+	return 0
+}
+
+// -----------------------------------------------------------------------------
+
+func normalizeOrder(order int) int {
+	if order <= 0 {
+		return 1000
+	}
+	return order
+}
+
+// -----------------------------------------------------------------------------
+
+func sortByOrder[T any](items []T, getOrder func(T) int) {
+	hasOrder := false
+	for _, item := range items {
+		if getOrder(item) > 0 {
+			hasOrder = true
+			break
+		}
+	}
+	if !hasOrder {
+		return
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		return normalizeOrder(getOrder(items[i])) < normalizeOrder(getOrder(items[j]))
+	})
+}
+
+// -----------------------------------------------------------------------------
+
 // OnComponentConnected is triggered when a client connects via gRPC or NATS.
 // It unmarshals and validates menuJSON BEFORE locking bot.Mu so malformed payloads
 // never wipe out an existing valid component session.
@@ -65,11 +160,55 @@ func OnComponentConnected(bot *core.Bot, clientID, componentName, menuJSON strin
 		bot.Log.Warning("Component connected with empty menu", "id", clientID)
 		return
 	}
+	if len(menuJSON) > maxMenuJSONBytes {
+		bot.Log.Error("Component menu JSON exceeds maximum allowed size", "id", clientID, "bytes", len(menuJSON))
+		return
+	}
 
 	var rawItems []map[string]interface{}
+	var wrapperMap map[string]interface{}
 	if err := json.Unmarshal([]byte(menuJSON), &rawItems); err != nil {
-		bot.Log.Error("Failed to parse component menu JSON", "err", err, "json", menuJSON)
-		return
+		if objErr := json.Unmarshal([]byte(menuJSON), &wrapperMap); objErr != nil {
+			bot.Log.Error("Failed to parse component menu JSON", "err", err, "json", menuJSON)
+			return
+		}
+		for _, key := range []string{"rows", "menu", "buttons"} {
+			if arr, ok := wrapperMap[key].([]interface{}); ok {
+				for _, elem := range arr {
+					if itemMap, ok := elem.(map[string]interface{}); ok {
+						rawItems = append(rawItems, itemMap)
+					}
+				}
+				break
+			}
+		}
+	}
+
+	compPriority := 0
+	if wrapperMap != nil {
+		compPriority = extractNumericOrder(wrapperMap)
+	}
+
+	startIdx := 0
+	if compPriority <= 0 && len(rawItems) > 0 {
+		first := rawItems[0]
+		labelVal, _ := first["label"].(string)
+		btnsVal, hasBtns := first["buttons"].([]interface{})
+		menuVal, hasMenu := first["menu"].([]interface{})
+		isMetadataOnly := strings.TrimSpace(labelVal) == "" && (!hasBtns || len(btnsVal) == 0) && (!hasMenu || len(menuVal) == 0)
+
+		if rawCP, hasCP := first["component_priority"]; hasCP {
+			compPriority = extractNumericOrder(map[string]interface{}{"priority": rawCP})
+		}
+		if isMetadataOnly {
+			if compPriority <= 0 {
+				compPriority = extractNumericOrder(first)
+			}
+			startIdx = 1
+		}
+	}
+	if compPriority <= 0 {
+		compPriority = defaultComponentPriority(componentName)
 	}
 
 	root := &models.CommandMenu{
@@ -77,29 +216,53 @@ func OnComponentConnected(bot *core.Bot, clientID, componentName, menuJSON strin
 		Rows:  []models.CommandRow{},
 	}
 
-	for _, item := range rawItems {
-		row := parseMenuRow(item)
+	for _, item := range rawItems[startIdx:] {
+		row, err := parseMenuRow(item, 0)
+		if err != nil {
+			bot.Log.Error("Failed to parse component menu tree", "id", clientID, "err", err)
+			return
+		}
 		if len(row.Buttons) > 0 {
 			root.Rows = append(root.Rows, row)
 		}
 	}
+	sortByOrder(root.Rows, func(r models.CommandRow) int { return r.Order })
 
+	now := time.Now().UTC()
 	compMenu := &models.ComponentMenu{
-		Name:     componentName,
-		ClientID: clientID,
-		Root:     root,
+		Name:         componentName,
+		ClientID:     clientID,
+		Priority:     compPriority,
+		RegisteredAt: now,
+		Root:         root,
 	}
 
 	bot.Mu.Lock()
+	nextRev := uint64(1)
+	registeredAt := now
+	if existing, ok := bot.DynamicMenus[clientID]; ok && existing != nil {
+		nextRev = existing.Revision + 1
+		if !existing.RegisteredAt.IsZero() {
+			registeredAt = existing.RegisteredAt
+		}
+	}
+
 	// Clean up old sessions with the same name to prevent duplicates
 	for id, m := range bot.DynamicMenus {
-		if m.Name == componentName && id != clientID {
+		if m != nil && m.Name == componentName && id != clientID {
+			if m.Revision >= nextRev {
+				nextRev = m.Revision + 1
+			}
+			if registeredAt.Equal(now) && !m.RegisteredAt.IsZero() {
+				registeredAt = m.RegisteredAt
+			}
 			delete(bot.DynamicMenus, id)
 			delete(bot.Publishers, id)
 			// Migrate or clean up user states pointing to the old session ID
 			for key, activeID := range bot.UserStates {
 				if activeID == id {
 					bot.UserStates[key] = clientID
+					bot.UserPaths[key] = []string{}
 				}
 			}
 			for key, pending := range bot.PendingInputs {
@@ -109,42 +272,85 @@ func OnComponentConnected(bot *core.Bot, clientID, componentName, menuJSON strin
 			}
 		}
 	}
+
+	// Clean up stale state for the same clientID on re-registration or menu refresh
+	for key, pending := range bot.PendingInputs {
+		if pending.ClientID == clientID {
+			delete(bot.PendingInputs, key)
+		}
+	}
+	for key, activeID := range bot.UserStates {
+		if activeID == clientID {
+			if getMenuByPath(root, bot.UserPaths[key]) == nil {
+				bot.UserPaths[key] = []string{}
+			}
+		}
+	}
+
+	compMenu.Revision = nextRev
+	compMenu.RegisteredAt = registeredAt
 	bot.Publishers[clientID] = pub
 	bot.DynamicMenus[clientID] = compMenu
 	bot.Mu.Unlock()
 
-	bot.Log.Info("Dynamic menu registered", "client", clientID, "rows", len(root.Rows))
+	bot.Log.Info("Dynamic menu registered", "client", clientID, "rows", len(root.Rows), "revision", nextRev, "priority", compPriority)
 }
 
 // -----------------------------------------------------------------------------
 
-func parseMenuRow(data map[string]interface{}) models.CommandRow {
-	row := models.CommandRow{Buttons: []models.CommandButton{}}
+func parseMenuRow(data map[string]interface{}, depth int) (models.CommandRow, error) {
+	if depth > maxMenuDepth {
+		return models.CommandRow{}, fmt.Errorf("menu recursion depth exceeds limit of %d", maxMenuDepth)
+	}
+	row := models.CommandRow{
+		Order:   extractNumericOrder(data),
+		Buttons: []models.CommandButton{},
+	}
 	if btns, ok := data["buttons"].([]interface{}); ok {
 		for _, b := range btns {
 			if bMap, ok := b.(map[string]interface{}); ok {
-				row.Buttons = append(row.Buttons, parseButton(bMap))
+				btn, err := parseButton(bMap, depth)
+				if err != nil {
+					return models.CommandRow{}, err
+				}
+				row.Buttons = append(row.Buttons, btn)
 			}
 		}
 	} else {
-		row.Buttons = append(row.Buttons, parseButton(data))
+		btn, err := parseButton(data, depth)
+		if err != nil {
+			return models.CommandRow{}, err
+		}
+		row.Buttons = append(row.Buttons, btn)
 	}
-	return row
+	sortByOrder(row.Buttons, func(b models.CommandButton) int { return b.Order })
+	return row, nil
 }
 
 // -----------------------------------------------------------------------------
 
-func parseButton(data map[string]interface{}) models.CommandButton {
+func parseButton(data map[string]interface{}, depth int) (models.CommandButton, error) {
+	if depth > maxMenuDepth {
+		return models.CommandButton{}, fmt.Errorf("menu recursion depth exceeds limit of %d", maxMenuDepth)
+	}
 	label, _ := data["label"].(string)
+	order := extractNumericOrder(data)
 
 	if sub, ok := data["menu"].([]interface{}); ok {
 		subMenu := &models.CommandMenu{Title: label, Rows: []models.CommandRow{}}
 		for _, s := range sub {
 			if sMap, ok := s.(map[string]interface{}); ok {
-				subMenu.Rows = append(subMenu.Rows, parseMenuRow(sMap))
+				subRow, err := parseMenuRow(sMap, depth+1)
+				if err != nil {
+					return models.CommandButton{}, err
+				}
+				if len(subRow.Buttons) > 0 {
+					subMenu.Rows = append(subMenu.Rows, subRow)
+				}
 			}
 		}
-		return models.CommandButton{Label: label, NextMenu: subMenu}
+		sortByOrder(subMenu.Rows, func(r models.CommandRow) int { return r.Order })
+		return models.CommandButton{Label: label, Order: order, NextMenu: subMenu}, nil
 	}
 
 	cmdType := int32(0)
@@ -162,10 +368,11 @@ func parseButton(data map[string]interface{}) models.CommandButton {
 
 	return models.CommandButton{
 		Label:       label,
+		Order:       order,
 		CommandType: cmdType,
 		Payload:     payload,
 		InputPrompt: inputPrompt,
-	}
+	}, nil
 }
 
 // -----------------------------------------------------------------------------
@@ -189,11 +396,27 @@ func getMenuByPath(root *models.CommandMenu, path []string) *models.CommandMenu 
 			}
 		}
 		if next == nil {
-			return current // path broke, return what we have so far
+			return nil
 		}
 		current = next
 	}
 	return current
+}
+
+// -----------------------------------------------------------------------------
+
+func renderResolvedMenu(bot *core.Bot, c tb.Context, convKey core.ConversationKey, root *models.CommandMenu, path []string) error {
+	target := getMenuByPath(root, path)
+	if target == nil {
+		bot.Mu.Lock()
+		bot.UserPaths[convKey] = []string{}
+		bot.Mu.Unlock()
+		target = root
+	}
+	if target == nil {
+		return ShowMainMenu(bot, c)
+	}
+	return RenderMenu(bot, c, target)
 }
 
 // -----------------------------------------------------------------------------
@@ -224,9 +447,6 @@ func RequestEmergencyConfirmation(bot *core.Bot, c tb.Context, cmdType int32) er
 	case models.CmdPowerOff:
 		confirmLabel = models.BtnConfirmPowerOff
 		promptText = "⚠️ Are you sure you want to POWER OFF all connected components? Please confirm within 60s."
-	case models.CmdStop:
-		confirmLabel = models.BtnConfirmCloseAll
-		promptText = "⚠️ Are you sure you want to CLOSE ALL POSITIONS across all connected components? Please confirm within 60s."
 	default:
 		return fmt.Errorf("unsupported emergency command type: %d", cmdType)
 	}
@@ -251,26 +471,58 @@ func RequestEmergencyConfirmation(bot *core.Bot, c tb.Context, cmdType int32) er
 
 func executeEmergencyBroadcast(bot *core.Bot, c tb.Context, cmdType int32) error {
 	bot.Mu.RLock()
-	pubs := make([]interfaces.IPublisher, 0, len(bot.Publishers))
-	for _, pub := range bot.Publishers {
-		if pub != nil {
-			pubs = append(pubs, pub)
+	targets := make([]broadcastTarget, 0, len(bot.Publishers))
+	for clientID, pub := range bot.Publishers {
+		if pub == nil {
+			continue
 		}
+		name := clientID
+		if comp, exists := bot.DynamicMenus[clientID]; exists && comp != nil && comp.Name != "" {
+			name = comp.Name
+		}
+		targets = append(targets, broadcastTarget{
+			clientID: clientID,
+			name:     name,
+			pub:      pub,
+		})
 	}
 	bot.Mu.RUnlock()
+
+	if len(targets) == 0 {
+		_ = bot.Send(c, "ℹ️ No components currently connected.")
+		return ShowMainMenu(bot, c)
+	}
 
 	dispatchCtx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
 
-	for _, pub := range pubs {
-		_ = pub.PublishCommand(dispatchCtx, cmdType, "", "")
-	}
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	succeeded := 0
+	var failed []string
 
-	switch cmdType {
-	case models.CmdPowerOff:
-		_ = bot.Send(c, "🆘 Powering off all components...")
-	case models.CmdStop:
-		_ = bot.Send(c, "🛑 Calling 'stop' on all components...")
+	for _, t := range targets {
+		wg.Add(1)
+		go func(target broadcastTarget) {
+			defer wg.Done()
+			if err := target.pub.PublishCommand(dispatchCtx, cmdType, "", ""); err != nil {
+				mu.Lock()
+				failed = append(failed, fmt.Sprintf("%s (%v)", target.name, err))
+				mu.Unlock()
+				return
+			}
+			mu.Lock()
+			succeeded++
+			mu.Unlock()
+		}(t)
+	}
+	wg.Wait()
+	sort.Strings(failed)
+
+	if len(failed) == 0 {
+		_ = bot.Send(c, fmt.Sprintf("🆘 Power-off command delivered to all %d connected components.", succeeded))
+	} else {
+		_ = bot.Send(c, fmt.Sprintf("⚠️ Power-off delivered to %d/%d components. Failed: %s", succeeded, len(targets), strings.Join(failed, ", ")))
 	}
 
 	return ShowMainMenu(bot, c)
@@ -281,6 +533,10 @@ func executeEmergencyBroadcast(bot *core.Bot, c tb.Context, cmdType int32) error
 func executeButtonAction(bot *core.Bot, c tb.Context, convKey core.ConversationKey, clientID string, currentPath []string, btn *models.CommandButton) error {
 	bot.Mu.RLock()
 	pub, ok := bot.Publishers[clientID]
+	var compRev uint64
+	if comp, exists := bot.DynamicMenus[clientID]; exists && comp != nil {
+		compRev = comp.Revision
+	}
 	bot.Mu.RUnlock()
 
 	if !ok || pub == nil {
@@ -290,10 +546,11 @@ func executeButtonAction(bot *core.Bot, c tb.Context, convKey core.ConversationK
 	if btn.InputPrompt != "" {
 		bot.Mu.Lock()
 		bot.PendingInputs[convKey] = core.PendingInput{
-			ClientID:  clientID,
-			Button:    *btn,
-			Path:      clonePath(currentPath),
-			ExpiresAt: time.Now().Add(pendingInputTTL),
+			ClientID:     clientID,
+			MenuRevision: compRev,
+			Button:       *btn,
+			Path:         clonePath(currentPath),
+			ExpiresAt:    time.Now().Add(pendingInputTTL),
 		}
 		bot.Mu.Unlock()
 		return bot.Send(c, btn.InputPrompt, &tb.ReplyMarkup{RemoveKeyboard: true})
@@ -324,9 +581,6 @@ func HandleDynamicText(bot *core.Bot, c tb.Context) error {
 	if text == models.BtnPowerOff {
 		return RequestEmergencyConfirmation(bot, c, models.CmdPowerOff)
 	}
-	if text == models.BtnCloseAll {
-		return RequestEmergencyConfirmation(bot, c, models.CmdStop)
-	}
 
 	// 0b. Handle 2-Step Emergency Confirmation buttons & cancellation
 	if text == models.BtnCancel {
@@ -341,11 +595,8 @@ func HandleDynamicText(bot *core.Bot, c tb.Context) error {
 		return ShowMainMenu(bot, c)
 	}
 
-	if text == models.BtnConfirmPowerOff || text == models.BtnConfirmCloseAll {
+	if text == models.BtnConfirmPowerOff {
 		expectedCmd := models.CmdPowerOff
-		if text == models.BtnConfirmCloseAll {
-			expectedCmd = models.CmdStop
-		}
 
 		bot.Mu.Lock()
 		pendingConf, hasConf := bot.PendingConfirmations[convKey]
@@ -387,6 +638,11 @@ func HandleDynamicText(bot *core.Bot, c tb.Context) error {
 		comp := bot.DynamicMenus[pending.ClientID]
 		bot.Mu.RUnlock()
 
+		if comp != nil && pending.MenuRevision != 0 && comp.Revision != pending.MenuRevision {
+			_ = bot.Send(c, "⚠️ Component menu was updated; please select the action again.")
+			return ShowMainMenu(bot, c)
+		}
+
 		if pub != nil {
 			dispatchCtx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 			defer cancel()
@@ -397,7 +653,7 @@ func HandleDynamicText(bot *core.Bot, c tb.Context) error {
 			_ = pub.RequestRefresh(dispatchCtx)
 
 			if comp != nil {
-				return RenderMenu(bot, c, getMenuByPath(comp.Root, pending.Path))
+				return renderResolvedMenu(bot, c, convKey, comp.Root, pending.Path)
 			}
 			return ShowMainMenu(bot, c)
 		}
@@ -426,7 +682,7 @@ func HandleDynamicText(bot *core.Bot, c tb.Context) error {
 			bot.Mu.Unlock()
 
 			if comp != nil {
-				return RenderMenu(bot, c, getMenuByPath(comp.Root, newPath))
+				return renderResolvedMenu(bot, c, convKey, comp.Root, newPath)
 			}
 		} else {
 			delete(bot.UserStates, convKey)
@@ -451,7 +707,7 @@ func HandleDynamicText(bot *core.Bot, c tb.Context) error {
 			_ = pub.RequestRefresh(dispatchCtx)
 
 			if updatedComp != nil {
-				return RenderMenu(bot, c, getMenuByPath(updatedComp.Root, path))
+				return renderResolvedMenu(bot, c, convKey, updatedComp.Root, path)
 			}
 		}
 		return ShowMainMenu(bot, c)
@@ -495,20 +751,25 @@ func HandleDynamicText(bot *core.Bot, c tb.Context) error {
 
 	if inComp && ok && comp != nil {
 		currentMenu := getMenuByPath(comp.Root, path)
-		if currentMenu != nil {
-			btn := findButtonInMenu(currentMenu, text)
-			if btn != nil {
-				if btn.NextMenu != nil {
-					newPath := append(clonePath(path), text)
-					bot.Mu.Lock()
-					bot.UserPaths[convKey] = newPath
-					bot.Mu.Unlock()
-
-					return RenderMenu(bot, c, getMenuByPath(comp.Root, newPath))
+		if currentMenu == nil {
+			return renderResolvedMenu(bot, c, convKey, comp.Root, path)
+		}
+		btn := findButtonInMenu(currentMenu, text)
+		if btn != nil {
+			if btn.NextMenu != nil {
+				newPath := append(clonePath(path), text)
+				nextMenu := getMenuByPath(comp.Root, newPath)
+				if nextMenu == nil {
+					return renderResolvedMenu(bot, c, convKey, comp.Root, newPath)
 				}
+				bot.Mu.Lock()
+				bot.UserPaths[convKey] = newPath
+				bot.Mu.Unlock()
 
-				return executeButtonAction(bot, c, convKey, clientID, path, btn)
+				return RenderMenu(bot, c, nextMenu)
 			}
+
+			return executeButtonAction(bot, c, convKey, clientID, path, btn)
 		}
 	}
 
@@ -564,22 +825,51 @@ func ShowMainMenu(bot *core.Bot, c tb.Context) error {
 	menuStart := &tb.ReplyMarkup{ResizeKeyboard: true}
 	var finalRows []tb.Row
 
-	// A. Microservices (stacked vertically)
+	// A. Microservices (stacked vertically in OpenMFE priority order with deterministic tie-breaking)
 	bot.Mu.RLock()
+	menus := make([]*models.ComponentMenu, 0, len(bot.DynamicMenus))
 	for _, m := range bot.DynamicMenus {
+		if m != nil {
+			menus = append(menus, m)
+		}
+	}
+	bot.Mu.RUnlock()
+
+	sort.SliceStable(menus, func(i, j int) bool {
+		pi := menus[i].Priority
+		if pi <= 0 {
+			pi = 100
+		}
+		pj := menus[j].Priority
+		if pj <= 0 {
+			pj = 100
+		}
+		if pi != pj {
+			return pi < pj
+		}
+		nameI := strings.ToLower(strings.TrimSpace(menus[i].Name))
+		nameJ := strings.ToLower(strings.TrimSpace(menus[j].Name))
+		if nameI != nameJ {
+			return nameI < nameJ
+		}
+		if !menus[i].RegisteredAt.Equal(menus[j].RegisteredAt) {
+			return menus[i].RegisteredAt.Before(menus[j].RegisteredAt)
+		}
+		return menus[i].ClientID < menus[j].ClientID
+	})
+
+	for _, m := range menus {
 		icon := "📂 "
 		if strings.Contains(m.Name, "Config") {
 			icon = "⚙️ "
 		}
 		finalRows = append(finalRows, menuStart.Row(menuStart.Text(fmt.Sprintf("%s%s", icon, m.Name))))
 	}
-	bot.Mu.RUnlock()
 
 	// B. Emergency Controls + refresh (grouped horizontally on ONE line)
 	finalRows = append(finalRows, menuStart.Row(
 		menuStart.Text(models.BtnPowerOff),
 		menuStart.Text("🔄 refresh"),
-		menuStart.Text(models.BtnCloseAll),
 	))
 
 	menuStart.Reply(finalRows...)

@@ -85,3 +85,26 @@ func TestRateLimiter_NilSafe(t *testing.T) {
 		t.Fatalf("Nil RateLimiter should safely allow requests")
 	}
 }
+
+// -----------------------------------------------------------------------------
+
+func TestRateLimiter_MaxTrackedClientsEviction(t *testing.T) {
+	rl := NewRateLimiter(5, 500*time.Millisecond, 1*time.Second)
+
+	for i := 0; i < MaxTrackedClients+10; i++ {
+		key := ConversationKey{ChatID: int64(i + 1), UserID: int64(i + 1)}
+		allowed, _ := rl.Allow(key)
+		if !allowed {
+			t.Fatalf("First request for key %v expected to be allowed", key)
+		}
+	}
+
+	rl.mu.Lock()
+	count := len(rl.clients)
+	rl.mu.Unlock()
+
+	if count > MaxTrackedClients {
+		t.Fatalf("Expected len(rl.clients) <= %d, got %d", MaxTrackedClients, count)
+	}
+}
+
