@@ -37,7 +37,8 @@ import (
 const (
 	emergencyConfirmTTL = 60 * time.Second
 	pendingInputTTL     = 5 * time.Minute
-	commandTimeout      = 10 * time.Second
+	interactiveTimeout  = 3 * time.Second
+	emergencyTimeout    = 10 * time.Second
 	maxMenuJSONBytes    = 65536
 	maxMenuDepth        = 8
 )
@@ -493,7 +494,7 @@ func executeEmergencyBroadcast(bot *core.Bot, c tb.Context, cmdType int32) error
 		return ShowMainMenu(bot, c)
 	}
 
-	dispatchCtx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	dispatchCtx, cancel := context.WithTimeout(context.Background(), emergencyTimeout)
 	defer cancel()
 
 	var wg sync.WaitGroup
@@ -558,7 +559,7 @@ func executeButtonAction(bot *core.Bot, c tb.Context, convKey core.ConversationK
 
 	bot.Log.Info("Executing component command", "client", clientID, "type", btn.CommandType, "label", btn.Label)
 
-	dispatchCtx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	dispatchCtx, cancel := context.WithTimeout(context.Background(), interactiveTimeout)
 	defer cancel()
 
 	if err := pub.PublishCommand(dispatchCtx, btn.CommandType, btn.Payload, ""); err != nil {
@@ -617,17 +618,16 @@ func HandleDynamicText(bot *core.Bot, c tb.Context) error {
 		return executeEmergencyBroadcast(bot, c, expectedCmd)
 	}
 
-	// Any other interaction clears an unconfirmed PendingConfirmation
+	// 0c. Atomically clear unconfirmed PendingConfirmation and check/extract PendingInput
 	bot.Mu.Lock()
 	delete(bot.PendingConfirmations, convKey)
+	pending, hasPending := bot.PendingInputs[convKey]
+	if hasPending {
+		delete(bot.PendingInputs, convKey)
+	}
 	bot.Mu.Unlock()
 
-	// 0c. Intercept Input Mode (scoped by ConversationKey and routed strictly to pending.ClientID)
-	bot.Mu.Lock()
-	if pending, ok := bot.PendingInputs[convKey]; ok {
-		delete(bot.PendingInputs, convKey)
-		bot.Mu.Unlock()
-
+	if hasPending {
 		if !pending.ExpiresAt.IsZero() && time.Now().After(pending.ExpiresAt) {
 			_ = bot.Send(c, "⏰ Input prompt expired. Please select the action again.")
 			return ShowMainMenu(bot, c)
@@ -644,7 +644,7 @@ func HandleDynamicText(bot *core.Bot, c tb.Context) error {
 		}
 
 		if pub != nil {
-			dispatchCtx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+			dispatchCtx, cancel := context.WithTimeout(context.Background(), interactiveTimeout)
 			defer cancel()
 
 			if err := pub.PublishCommand(dispatchCtx, pending.Button.CommandType, pending.Button.Payload, text); err != nil {
@@ -659,7 +659,6 @@ func HandleDynamicText(bot *core.Bot, c tb.Context) error {
 		}
 		return bot.Send(c, "❌ Error: Service disconnected.")
 	}
-	bot.Mu.Unlock()
 
 	// 1. Navigation: Main Menu
 	if text == "📱 main menu" {
@@ -702,7 +701,7 @@ func HandleDynamicText(bot *core.Bot, c tb.Context) error {
 		bot.Mu.RUnlock()
 
 		if inComp && pub != nil {
-			dispatchCtx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+			dispatchCtx, cancel := context.WithTimeout(context.Background(), interactiveTimeout)
 			defer cancel()
 			_ = pub.RequestRefresh(dispatchCtx)
 

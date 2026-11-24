@@ -19,6 +19,7 @@ KEY PARAMETERS:
 import (
 	"bytes"
 	_ "embed"
+	"sync"
 
 	"github.com/Bastien-Antigravity/tele-remote/src/models"
 	"github.com/Bastien-Antigravity/tele-remote/src/telegram/core"
@@ -32,6 +33,11 @@ import (
 //go:embed assets/start.png
 var startImage []byte
 
+var (
+	cachedStartFileID string
+	cachedFileIDMu    sync.RWMutex
+)
+
 // -----------------------------------------------------------------------------
 
 // SetupRoutes initializes global middlewares, static handlers, and dynamic reply-keyboard routing.
@@ -43,7 +49,7 @@ func SetupRoutes(bot *core.Bot) {
 
 	bot.B.Handle("/start", func(c tb.Context) error {
 		convKey := core.GetConvKey(c)
-		bot.Log.Info("User triggered /start", "chat_id", convKey.ChatID, "user", convKey.UserID)
+		bot.Log.Info("User triggered /start", "chat_id", core.MaskChatID(convKey.ChatID), "user", core.MaskChatID(convKey.UserID))
 
 		// Reset user state to main menu
 		bot.Mu.Lock()
@@ -54,8 +60,22 @@ func SetupRoutes(bot *core.Bot) {
 		bot.Mu.Unlock()
 
 		if len(startImage) != 0 {
-			photo := &tb.Photo{File: tb.FromReader(bytes.NewReader(startImage))}
-			_ = bot.Send(c, photo)
+			cachedFileIDMu.RLock()
+			fileID := cachedStartFileID
+			cachedFileIDMu.RUnlock()
+
+			if fileID != "" {
+				photo := &tb.Photo{File: tb.File{FileID: fileID}}
+				_ = bot.Send(c, photo)
+			} else {
+				photo := &tb.Photo{File: tb.FromReader(bytes.NewReader(startImage))}
+				if sentMsg, err := bot.B.Send(c.Recipient(), photo); err == nil && sentMsg != nil && sentMsg.Photo != nil {
+					cachedFileIDMu.Lock()
+					cachedStartFileID = sentMsg.Photo.FileID
+					cachedFileIDMu.Unlock()
+					bot.Log.Info("Start banner cached on Telegram CDN for fast-path reuse")
+				}
+			}
 		}
 
 		return ui.ShowMainMenu(bot, c)

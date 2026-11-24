@@ -20,6 +20,8 @@ KEY PARAMETERS:
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
@@ -63,6 +65,21 @@ func GetConvKey(c tb.Context) ConversationKey {
 		ChatID: chatID,
 		UserID: userID,
 	}
+}
+
+// -----------------------------------------------------------------------------
+
+// MaskChatID returns a sanitized representation of a Telegram Chat/User ID
+// (e.g. "...3982") to prevent plaintext credential leakage in logs and telemetry.
+func MaskChatID(id int64) string {
+	if id == 0 {
+		return "0"
+	}
+	s := strconv.FormatInt(id, 10)
+	if len(s) <= 4 {
+		return "***"
+	}
+	return "..." + s[len(s)-4:]
 }
 
 // -----------------------------------------------------------------------------
@@ -129,11 +146,49 @@ type Bot struct {
 
 // -----------------------------------------------------------------------------
 
+// keepAliveTransport wraps a base RoundTripper and returns a shallow copy of the response.
+// This prevents third-party callers (such as telebot.v3) that mutate resp.Close = true from
+// causing Go's persistConn.readLoop to tear down warm TCP/TLS keep-alive connections.
+type keepAliveTransport struct {
+	base http.RoundTripper
+}
+
+func (t *keepAliveTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.base.RoundTrip(req)
+	if err != nil {
+		return nil, err
+	}
+	shallow := *resp
+	return &shallow, nil
+}
+
+// -----------------------------------------------------------------------------
+
 // NewBot registers Telebot settings, initializes memory maps, and starts the background telemetry worker.
 func NewBot(token, url, chatID string, log unilog_ifaces.Logger, allowedUsers ...string) (*Bot, error) {
+	baseTransport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   30,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+
+	httpClient := &http.Client{
+		Transport: &keepAliveTransport{base: baseTransport},
+		Timeout:   time.Minute,
+	}
+
 	pref := tb.Settings{
 		Token:  token,
 		Poller: &tb.LongPoller{Timeout: 10 * time.Second},
+		Client: httpClient,
 	}
 
 	if url != "" {
@@ -219,7 +274,7 @@ func (bot *Bot) Start(ctx context.Context) {
 		bot.B.Stop()
 	}()
 
-	bot.Log.Info("Telebot starting polling...", "chatID", bot.Cfg.ChatID)
+	bot.Log.Info("Telebot starting polling...")
 	bot.B.Start()
 }
 
@@ -302,7 +357,7 @@ func (bot *Bot) AuthMiddleware() tb.MiddlewareFunc {
 					username = c.Sender().Username
 				}
 				bot.Log.Warning("Unauthorized Telegram access attempt rejected",
-					"chat_id", chatID, "user_id", userID, "username", username)
+					"chat_id", MaskChatID(chatID), "user_id", MaskChatID(userID), "username", username)
 				return bot.Send(c, "⛔ Unauthorized access.")
 			}
 			return next(c)
@@ -312,7 +367,7 @@ func (bot *Bot) AuthMiddleware() tb.MiddlewareFunc {
 
 // -----------------------------------------------------------------------------
 
-// Broadcast sends a plain text message to all pre-configured ChatIDs, chunking long payloads.
+// Broadcast sends a plain text message to all pre-configured ChatIDs in parallel, chunking long payloads.
 func (bot *Bot) Broadcast(msg string) {
 	if bot.Cfg == nil || len(bot.Cfg.BroadcastIDs) == 0 {
 		bot.Log.Warning("Broadcast failed: no authorized broadcast chat IDs configured")
@@ -320,14 +375,20 @@ func (bot *Bot) Broadcast(msg string) {
 	}
 
 	chunks := splitTelegramMessage(msg, maxTelegramMessageLen)
-	for _, chatID := range bot.Cfg.BroadcastIDs {
-		chat := &tb.Chat{ID: chatID}
-		for _, chunk := range chunks {
-			if _, err := bot.B.Send(chat, chunk); err != nil {
-				bot.Log.Error("Failed to broadcast telemetry to chat", "chat_id", chatID, "err", err)
+	var wg sync.WaitGroup
+	for _, id := range bot.Cfg.BroadcastIDs {
+		wg.Add(1)
+		go func(chatID int64) {
+			defer wg.Done()
+			chat := &tb.Chat{ID: chatID}
+			for _, chunk := range chunks {
+				if _, err := bot.B.Send(chat, chunk); err != nil {
+					bot.Log.Error("Failed to broadcast telemetry to chat", "chat_id", MaskChatID(chatID), "err", err)
+				}
 			}
-		}
+		}(id)
 	}
+	wg.Wait()
 }
 
 // -----------------------------------------------------------------------------
@@ -403,9 +464,9 @@ func (bot *Bot) LoggingMiddleware() tb.MiddlewareFunc {
 				if hasPending {
 					loggedText = "[REDACTED_PENDING_INPUT]"
 				}
-				bot.Log.Info("Received message", "chat_id", chatID, "user", userID, "text", loggedText)
+				bot.Log.Info("Received message", "chat_id", MaskChatID(chatID), "user", MaskChatID(userID), "text", loggedText)
 			} else if c != nil && c.Callback() != nil {
-				bot.Log.Info("Received callback", "chat_id", chatID, "user", userID, "data", c.Callback().Data)
+				bot.Log.Info("Received callback", "chat_id", MaskChatID(chatID), "user", MaskChatID(userID), "data", c.Callback().Data)
 			}
 			return next(c)
 		}
@@ -420,6 +481,6 @@ func (bot *Bot) Send(c tb.Context, what interface{}, opts ...interface{}) error 
 	if c != nil && c.Chat() != nil {
 		chatID = c.Chat().ID
 	}
-	bot.Log.Info("Sending response", "chat_id", chatID, "content", fmt.Sprintf("%v", what))
+	bot.Log.Info("Sending response", "chat_id", MaskChatID(chatID), "content", fmt.Sprintf("%v", what))
 	return c.Send(what, opts...)
 }
