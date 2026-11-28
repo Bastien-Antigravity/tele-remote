@@ -772,7 +772,9 @@ func HandleDynamicText(bot *core.Bot, c tb.Context) error {
 		}
 	}
 
-	return nil
+	// 6. Fallback: If a user clicks a stale ReplyKeyboard button after a tele-remote restart
+	// (when in-memory UserStates is empty) or sends unrecognized text, re-render Main Menu.
+	return ShowMainMenu(bot, c)
 }
 
 // -----------------------------------------------------------------------------
@@ -819,8 +821,8 @@ func RenderMenu(bot *core.Bot, c tb.Context, m *models.CommandMenu) error {
 
 // -----------------------------------------------------------------------------
 
-// ShowMainMenu displays the dynamic top-level menu.
-func ShowMainMenu(bot *core.Bot, c tb.Context) error {
+// BuildMainMenuMarkup constructs the sorted top-level ReplyKeyboard markup for all registered components.
+func BuildMainMenuMarkup(bot *core.Bot) (*tb.ReplyMarkup, int) {
 	menuStart := &tb.ReplyMarkup{ResizeKeyboard: true}
 	var finalRows []tb.Row
 
@@ -872,5 +874,30 @@ func ShowMainMenu(bot *core.Bot, c tb.Context) error {
 	))
 
 	menuStart.Reply(finalRows...)
+	return menuStart, len(menus)
+}
+
+// -----------------------------------------------------------------------------
+
+// PushMainMenuToAdmins proactively pushes the top-level ReplyKeyboard to all configured human admin chats.
+func PushMainMenuToAdmins(bot *core.Bot) {
+	if bot == nil || bot.B == nil || bot.Cfg == nil || len(bot.Cfg.BroadcastIDs) == 0 {
+		return
+	}
+	markup, count := BuildMainMenuMarkup(bot)
+	caption := fmt.Sprintf("🟢 Antigravity Remote ready (%d services connected).", count)
+	for _, id := range bot.Cfg.BroadcastIDs {
+		chat := &tb.Chat{ID: id}
+		if _, err := bot.B.Send(chat, caption, markup); err != nil {
+			bot.Log.Warning("Failed to push main menu keyboard to chat", "chat_id", core.MaskChatID(id), "err", err)
+		}
+	}
+}
+
+// -----------------------------------------------------------------------------
+
+// ShowMainMenu displays the dynamic top-level menu.
+func ShowMainMenu(bot *core.Bot, c tb.Context) error {
+	menuStart, _ := BuildMainMenuMarkup(bot)
 	return bot.Send(c, "Welcome to Antigravity Remote.", menuStart)
 }

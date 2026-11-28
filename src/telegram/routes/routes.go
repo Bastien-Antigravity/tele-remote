@@ -47,9 +47,9 @@ func SetupRoutes(bot *core.Bot) {
 	m := &tb.ReplyMarkup{}
 	btnPowerOff := m.Text(models.BtnPowerOff)
 
-	bot.B.Handle("/start", func(c tb.Context) error {
+	resetAndShowMainMenu := func(c tb.Context, trigger string) error {
 		convKey := core.GetConvKey(c)
-		bot.Log.Info("User triggered /start", "chat_id", core.MaskChatID(convKey.ChatID), "user", core.MaskChatID(convKey.UserID))
+		bot.Log.Info("User triggered menu command", "cmd", trigger, "chat_id", core.MaskChatID(convKey.ChatID), "user", core.MaskChatID(convKey.UserID))
 
 		// Reset user state to main menu
 		bot.Mu.Lock()
@@ -59,7 +59,7 @@ func SetupRoutes(bot *core.Bot) {
 		delete(bot.PendingConfirmations, convKey)
 		bot.Mu.Unlock()
 
-		if len(startImage) != 0 {
+		if trigger == "/start" && len(startImage) != 0 {
 			cachedFileIDMu.RLock()
 			fileID := cachedStartFileID
 			cachedFileIDMu.RUnlock()
@@ -79,6 +79,14 @@ func SetupRoutes(bot *core.Bot) {
 		}
 
 		return ui.ShowMainMenu(bot, c)
+	}
+
+	bot.B.Handle("/start", func(c tb.Context) error {
+		return resetAndShowMainMenu(c, "/start")
+	})
+
+	bot.B.Handle("/menu", func(c tb.Context) error {
+		return resetAndShowMainMenu(c, "/menu")
 	})
 
 	bot.B.Handle(&btnPowerOff, func(c tb.Context) error {

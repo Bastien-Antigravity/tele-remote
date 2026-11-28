@@ -208,6 +208,16 @@ func NewBot(token, url, chatID string, log unilog_ifaces.Logger, allowedUsers ..
 	}
 
 	authIDs, broadcastIDs := parseAuthorizedIDs(chatID, allowedUsers...)
+	if b != nil && b.Me != nil && b.Me.ID != 0 {
+		delete(authIDs, b.Me.ID)
+		filteredBroadcast := make([]int64, 0, len(broadcastIDs))
+		for _, id := range broadcastIDs {
+			if id != b.Me.ID {
+				filteredBroadcast = append(filteredBroadcast, id)
+			}
+		}
+		broadcastIDs = filteredBroadcast
+	}
 
 	cfg := &Config{
 		TelegramToken: token,
@@ -275,6 +285,12 @@ func (bot *Bot) Start(ctx context.Context) {
 	}()
 
 	bot.Log.Info("Telebot starting polling...")
+	if err := bot.B.SetCommands([]tb.Command{
+		{Text: "menu", Description: "Open Antigravity Remote main menu"},
+		{Text: "start", Description: "Reset session and open main menu"},
+	}); err != nil {
+		bot.Log.Warning("Failed to register Telegram bot menu commands", "err", err)
+	}
 	bot.B.Start()
 }
 

@@ -24,6 +24,8 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
+	"time"
 
 	tele_interfaces "github.com/Bastien-Antigravity/tele-remote/src/interfaces"
 	"github.com/Bastien-Antigravity/tele-remote/src/subscribers"
@@ -230,19 +232,27 @@ func main() {
 	// 5. Setup Routes
 	routes.SetupRoutes(bot)
 
-	// 6. Wrap Bot methods into Subscriber Callbacks
+	// 6. Initialize Lifecycle Manager
+	lm := toolbox_lifecycle.NewManagerWithLogger(log)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 7. Wrap Bot methods into Subscriber Callbacks
+	var initialMenuPush sync.Once
 	botCallbacks := tele_interfaces.ISubscriberCallbacks{
 		OnTelemetry: bot.OnTelemetry,
 		OnRegistration: func(clientID, componentName, menuJSON string, pub tele_interfaces.IPublisher) {
 			ui.OnComponentConnected(bot, clientID, componentName, menuJSON, pub)
+			initialMenuPush.Do(func() {
+				time.AfterFunc(2500*time.Millisecond, func() {
+					if ctx.Err() == nil {
+						ui.PushMainMenuToAdmins(bot)
+					}
+				})
+			})
 		},
 		OnDisconnect: bot.OnDisconnect,
 	}
-
-	// 7. Initialize Lifecycle Manager
-	lm := toolbox_lifecycle.NewManagerWithLogger(log)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	// 8. Start Subscribers (Transport Layer)
 	grpcSub := subscribers.NewGrpcSubscriber(log, bindIP, bindPort)

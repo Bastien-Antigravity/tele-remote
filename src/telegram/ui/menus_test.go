@@ -729,3 +729,36 @@ func TestMenu_RowAndButtonOrderingWithDuplicateTolerance(t *testing.T) {
 		}
 	}
 }
+
+// -----------------------------------------------------------------------------
+
+func TestHandleDynamicText_StaleButtonAfterRestartRestoresMainMenu(t *testing.T) {
+	ms := newMockTelegramServer()
+	defer ms.Close()
+
+	// Note: mock server returns bot ID = 1; include "1" in allowedUsers to verify self-ID filtering too.
+	bot, err := core.NewBot("12345:TEST_TOKEN", ms.server.URL, "12345678", &MockLogger{}, "1,87654321")
+	if err != nil {
+		t.Fatalf("Failed to init bot: %v", err)
+	}
+
+	for _, id := range bot.Cfg.BroadcastIDs {
+		if id == 1 {
+			t.Fatalf("Expected bot's own user ID (1) to be excluded from BroadcastIDs, got %v", bot.Cfg.BroadcastIDs)
+		}
+	}
+
+	OnComponentConnected(bot, "wd-1", "Watchdog Agent", `[{"label": "📊 Fleet Status", "cmd_type": 99}]`, &MockPublisher{})
+
+	// Simulate user clicking a stale submenu button ("📊 Fleet Status") when UserStates is empty after restart
+	staleCtx := newFakeUIContext(12345678, 777, "📊 Fleet Status")
+	if err := HandleDynamicText(bot, staleCtx); err != nil {
+		t.Fatalf("HandleDynamicText failed on stale button: %v", err)
+	}
+	if len(staleCtx.sentMarkups) != 1 {
+		t.Fatalf("Expected Main Menu ReplyMarkup to be restored on stale button click, got %d markups", len(staleCtx.sentMarkups))
+	}
+	if len(staleCtx.sentMarkups[0].ReplyKeyboard) < 2 || staleCtx.sentMarkups[0].ReplyKeyboard[0][0].Text != "📂 Watchdog Agent" {
+		t.Fatalf("Expected restored Main Menu to contain '📂 Watchdog Agent', got %+v", staleCtx.sentMarkups[0].ReplyKeyboard)
+	}
+}
