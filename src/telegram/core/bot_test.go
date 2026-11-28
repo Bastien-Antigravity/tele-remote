@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -21,45 +20,64 @@ import (
 // Mocks
 // -----------------------------------------------------------------------------
 
+type mockRoundTripper struct {
+	fn func(*http.Request) (*http.Response, error)
+}
+
+func (m *mockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	return m.fn(req)
+}
+
 type mockTelegramServer struct {
-	server      *httptest.Server
+	URL         string
 	receivedMsg string
 	messages    []string
 	mu          sync.Mutex
 }
 
 func newMockTelegramServer() *mockTelegramServer {
-	ms := &mockTelegramServer{}
-	ms.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ms.mu.Lock()
-		defer ms.mu.Unlock()
+	ms := &mockTelegramServer{
+		URL: "http://mock.telegram.local",
+	}
+	SetTestRoundTripper(&mockRoundTripper{
+		fn: func(r *http.Request) (*http.Response, error) {
+			ms.mu.Lock()
+			defer ms.mu.Unlock()
 
-		w.Header().Set("Content-Type", "application/json")
-		if strings.HasSuffix(r.URL.Path, "/getMe") {
-			_, _ = w.Write([]byte(`{"ok":true,"result":{"id":1,"is_bot":true,"first_name":"TestBot","username":"test_bot"}}`))
-		} else if strings.HasSuffix(r.URL.Path, "/sendMessage") {
-			text := r.URL.Query().Get("text")
-			if text == "" && r.Body != nil {
-				var body struct {
-					Text string `json:"text"`
+			var respBody string
+			if strings.HasSuffix(r.URL.Path, "/getMe") {
+				respBody = `{"ok":true,"result":{"id":1,"is_bot":true,"first_name":"TestBot","username":"test_bot"}}`
+			} else if strings.HasSuffix(r.URL.Path, "/sendMessage") {
+				text := r.URL.Query().Get("text")
+				if text == "" && r.Body != nil {
+					var body struct {
+						Text string `json:"text"`
+					}
+					if data, err := io.ReadAll(r.Body); err == nil {
+						_ = json.Unmarshal(data, &body)
+						text = body.Text
+					}
 				}
-				if data, err := io.ReadAll(r.Body); err == nil {
-					_ = json.Unmarshal(data, &body)
-					text = body.Text
-				}
+				ms.receivedMsg = text
+				ms.messages = append(ms.messages, text)
+				respBody = `{"ok":true,"result":{"message_id":1}}`
+			} else {
+				respBody = `{"ok":true}`
 			}
-			ms.receivedMsg = text
-			ms.messages = append(ms.messages, text)
-			_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":1}}`))
-		} else {
-			_, _ = w.Write([]byte(`{"ok":true}`))
-		}
-	}))
+
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(respBody)),
+				Request:    r,
+			}, nil
+		},
+	})
 	return ms
 }
 
 func (ms *mockTelegramServer) Close() {
-	ms.server.Close()
+	SetTestRoundTripper(nil)
 }
 
 func (ms *mockTelegramServer) lastMessage() string {
@@ -79,12 +97,22 @@ func (m *MockLogger) Debug(f string, a ...any) {}
 func (m *MockLogger) Info(f string, a ...any) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.infos = append(m.infos, fmt.Sprintf("%s %v", f, a))
+	m.infos = append(m.infos, fmt.Sprintf(f, a...))
+}
+func (m *MockLogger) Logon(f string, a ...any) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.infos = append(m.infos, fmt.Sprintf(f, a...))
+}
+func (m *MockLogger) Logout(f string, a ...any) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.infos = append(m.infos, fmt.Sprintf(f, a...))
 }
 func (m *MockLogger) Warning(f string, a ...any) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.warnings = append(m.warnings, f)
+	m.warnings = append(m.warnings, fmt.Sprintf(f, a...))
 }
 func (m *MockLogger) Error(f string, a ...any)    {}
 func (m *MockLogger) Critical(f string, a ...any) {}
@@ -172,14 +200,13 @@ func TestBot_Broadcast(t *testing.T) {
 	ms := newMockTelegramServer()
 	defer ms.Close()
 
-	bot, err := NewBot("12345:TEST_TOKEN", ms.server.URL, "12345678", &MockLogger{})
+	bot, err := NewBot("12345:TEST_TOKEN", ms.URL, "12345678", &MockLogger{})
 	if err != nil {
 		t.Fatalf("Failed to init bot: %v", err)
 	}
+	defer func() { _ = bot.Stop() }()
 
 	bot.Broadcast("Hello Telemetry")
-
-	time.Sleep(50 * time.Millisecond)
 
 	if got := ms.lastMessage(); got != "Hello Telemetry" {
 		t.Errorf("Expected 'Hello Telemetry', got '%s'", got)
@@ -192,10 +219,11 @@ func TestBot_OnTelemetryNonBlocking(t *testing.T) {
 	ms := newMockTelegramServer()
 	defer ms.Close()
 
-	bot, err := NewBot("12345:TEST_TOKEN", ms.server.URL, "12345678", &MockLogger{})
+	bot, err := NewBot("12345:TEST_TOKEN", ms.URL, "12345678", &MockLogger{})
 	if err != nil {
 		t.Fatalf("Failed to init bot: %v", err)
 	}
+	defer func() { _ = bot.Stop() }()
 
 	bot.OnTelemetry("Async Telemetry Message")
 
@@ -216,10 +244,11 @@ func TestBot_AuthMiddlewareRejectsUnauthorizedChatID(t *testing.T) {
 	defer ms.Close()
 
 	logger := &MockLogger{}
-	bot, err := NewBot("12345:TEST_TOKEN", ms.server.URL, "12345678, 87654321, -10099999", logger, "99990000")
+	bot, err := NewBot("12345:TEST_TOKEN", ms.URL, "12345678, 87654321, -10099999", logger, "99990000")
 	if err != nil {
 		t.Fatalf("Failed to init bot: %v", err)
 	}
+	defer func() { _ = bot.Stop() }()
 
 	handlerCalled := false
 	mw := bot.AuthMiddleware()
@@ -301,10 +330,11 @@ func TestBot_RateLimitMiddleware(t *testing.T) {
 	defer ms.Close()
 
 	logger := &MockLogger{}
-	bot, err := NewBot("12345:TEST_TOKEN", ms.server.URL, "12345678", logger)
+	bot, err := NewBot("12345:TEST_TOKEN", ms.URL, "12345678", logger)
 	if err != nil {
 		t.Fatalf("Failed to init bot: %v", err)
 	}
+	defer func() { _ = bot.Stop() }()
 	bot.Limiter = NewRateLimiter(2, 500*time.Millisecond, 1*time.Second)
 
 	callCount := 0
@@ -356,10 +386,11 @@ func TestBot_LoggingMiddlewareRedactsPendingInput(t *testing.T) {
 	defer ms.Close()
 
 	logger := &MockLogger{}
-	bot, err := NewBot("12345:TEST_TOKEN", ms.server.URL, "12345678", logger)
+	bot, err := NewBot("12345:TEST_TOKEN", ms.URL, "12345678", logger)
 	if err != nil {
 		t.Fatalf("Failed to init bot: %v", err)
 	}
+	defer func() { _ = bot.Stop() }()
 
 	convKey := ConversationKey{ChatID: 12345678, UserID: 12345678}
 	bot.Mu.Lock()

@@ -14,12 +14,9 @@ tags:
 
 # 📋 Features & Behavior: tele-remote
 
-This document maps the core features and BDD behavior expectations for the `tele-remote` edge interface.
+This document summarizes the core features and behavior expectations for `tele-remote`.
 
 ## 🌟 Key Features
-*   **Command Validation**: Ensures inbound operator requests comply with authentication schemas.
-*   **Session Connection Routing**: Dynamically maps external terminal connections to target execution sandboxes.
-*   **Heartbeat Checking**: Standardized heartbeat frame tracking via SafeSocket.
-
-## 🔗 Business BDD Integration
-*   Detailed Given/When/Then scenarios are managed under `02-Business-BDD` in the `tele-remote` specs path.
+* **Option A gRPC TLS/mTLS & Token Gate**: Validates `x-tele-auth` metadata, Option A X.509 certificates (`local.tele_remote.tls`), and first-frame component registration.
+* **Dynamic In-Memory Menu Registry**: Parses and validates bounded JSON menu trees (`<= 64 KB`, `<= 8` depth) and orders components by OpenMFE priority.
+* **Strict Telegram Authorization & Rate Limiting**: Enforces per-`ConversationKey` sliding-window flood control, `AuthorizedIDs` sender validation, 2-step `CmdPowerOff` confirmation, and pending-input log redaction.

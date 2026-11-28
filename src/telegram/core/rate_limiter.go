@@ -179,8 +179,8 @@ func (bot *Bot) RateLimitMiddleware() tb.MiddlewareFunc {
 			allowed, sendWarning := bot.Limiter.Allow(convKey)
 			if !allowed {
 				if sendWarning {
-					bot.Log.Warning("Rate limit exceeded; throttling client",
-						"chat_id", MaskChatID(convKey.ChatID), "user_id", MaskChatID(convKey.UserID))
+					bot.Log.Warning("RateLimiter : Rate limit exceeded; throttling client (chat_id=%s, user_id=%s)",
+						MaskChatID(convKey.ChatID), MaskChatID(convKey.UserID))
 					if c.Callback() != nil {
 						_ = c.Respond(&tb.CallbackResponse{
 							Text:      "⏳ Slow down: too many requests.",

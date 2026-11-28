@@ -14,15 +14,18 @@ tags:
 
 # 🧪 Testing Playbook: tele-remote
 
-Quality assurance and local verification playbook for the `tele-remote` edge interface.
+Quality assurance and local verification playbook for `tele-remote`.
 
 ## 🛠️ Automated Testing Suite
-*   **Unit Tests**: Local Go tests verifying websocket message parsing logic.
-    ```bash
-    go test ./src/websocket/...
-    ```
-*   **Integration Tests**: Run in native sandbox environment via `sandbox-testing` repository commands.
-
-## 📦 Manual Validation Steps
-1.  Fire up the test suite in the local dev configuration profiles.
-2.  Confirm that trace metrics flow seamlessly into the `log-server`.
+* **Unit & Adversarial Tests**: Run all Go package tests with the race detector:
+  ```bash
+  go test -v -race ./...
+  ```
+* **Standalone Build Verification**:
+  ```bash
+  GOWORK=off go build ./...
+  ```
+* **Ecosystem Compliance Audit**:
+  ```bash
+  python3 ../obsidian-brain/08-Squad-Agent/main.py validate-compliance tele-remote
+  ```

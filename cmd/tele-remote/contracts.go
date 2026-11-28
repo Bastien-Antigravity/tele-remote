@@ -20,8 +20,9 @@ KEY PARAMETERS:
 import (
 	"strings"
 
-	toolbox_spec "github.com/Bastien-Antigravity/microservice-toolbox/go/pkg/spec"
 	"github.com/Bastien-Antigravity/tele-remote/src/grpc_control"
+
+	toolbox_spec "github.com/Bastien-Antigravity/microservice-toolbox/go/pkg/spec"
 )
 
 // -----------------------------------------------------------------------------

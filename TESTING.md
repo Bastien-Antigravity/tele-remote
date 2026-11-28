@@ -1,49 +1,30 @@
 # Testing Tele-Remote
 
-Tele-Remote uses a mockable infrastructure to allow full unit testing without requiring a real Telegram Bot Token or an internet connection.
+Tele-Remote uses a deterministic, zero-network mock infrastructure so the entire unit and adversarial test suite runs offline without a real Telegram Bot Token or external network access.
 
 ## 1. Running Unit Tests
 
-To run the full suite of unit tests:
+To run the full suite of unit tests with the race detector:
 
 ```bash
-go test ./src/telegram/... -v
+go test -v -race ./...
 ```
 
 ## 2. Test Suite Details
 
-The current test suite covers the core logic of the Telegram gateway using a mock API server.
+### A. gRPC Transport, mTLS & Stalled-Stream Eviction (`src/subscribers/grpc_test.go`)
+- **First-Frame Registration & Identity Pinning**: Verifies telemetry frames before registration and mid-stream component identity changes are rejected with `codes.PermissionDenied` (`"⛔ Unauthorized access"`).
+- **Bearer Token Authentication**: Verifies `x-tele-auth` / `authorization` metadata enforcement.
+- **Option A TLS/mTLS & Live Reload**: Generates ephemeral X.509 CA, server, and client certificates (`t.TempDir()`) and tests `auto` vs `strict` mode handshakes and atomic policy hot-reload rollbacks.
+- **Stalled-Stream Write Timeout & Eviction**: Verifies `GrpcPublisher.PublishCommand` unblocks immediately on context deadline expiration, invokes the stream abort hook, and fails fast with `ErrStreamAborted` on subsequent calls without wedging.
 
-### A. Bot Initialization & Registry (`TestBot_MenuRegistration`)
-- **Objective**: Ensures the bot correctly handshakes with the Telegram API and processes incoming microservice registrations.
-- **Logic**: 
-    1. Spins up a `httptest.Server` mimicking the Telegram `/getMe` endpoint.
-    2. Initializes a `Bot` instance using the `test` profile.
-    3. Simulates a component connection with a complex `Menu JSON`.
-    4. **Verification**: Checks that the menu is correctly parsed into `src/models` and mapped to the internal `dynamicMenus` registry.
+### B. Telegram Core & Rate Limiter (`src/telegram/core/bot_test.go`, `rate_limiter_test.go`)
+- **In-Memory Telegram Transport**: Uses `core.SetTestRoundTripper` to intercept `/getMe` and `/sendMessage` HTTP calls in memory without opening local TCP listeners.
+- **Sender Authorization**: Verifies `AuthMiddleware` allows configured `chat_id` and `allowed_users` while rejecting unauthorized group members and unknown chats.
+- **Pending-Input Log Redaction & 4000-Rune Chunking**: Verifies `LoggingMiddleware` redacts secret prompt replies (`[REDACTED_PENDING_INPUT]`) and `splitTelegramMessage` splits long payloads cleanly on newline boundaries.
+- **Sliding-Window Rate Limiter**: Verifies burst allowance, throttle warning cooldowns, per-`ConversationKey` isolation, and `MaxTrackedClients` (`4096`) eviction.
 
-### B. Telemetry Broadcasting (`TestBot_Broadcast`)
-- **Objective**: Verifies that telemetry data received from the ecosystem is correctly forwarded to the admin chat.
-- **Logic**:
-    1. Mocks the Telegram `/sendMessage` endpoint.
-    2. Triggers the `Broadcast()` method with a sample message.
-    3. **Verification**: Inspects the outgoing HTTP request to ensure the `chat_id` matches and the `text` payload is intact.
-
-## 3. Mocking Infrastructure
-
-The testing suite relies on `httptest.Server` to mimic the Telegram API.
-
-- **Profile**: Uses the `test` profile defined in `src/telegram/test.yaml`.
-- **API Redirection**: The `TelegramURL` in the config is overridden at runtime to point to the local mock server.
-- **Authentication**: A dummy token (`12345:TEST_TOKEN`) is used to verify that the bot correctly constructs the API paths.
-
-## 4. Local Development (Standalone)
-
-For manual testing in standalone mode:
-
-1. Ensure `TR_TOKEN` and `TR_CHATID` are set in your environment.
-2. Run the service:
-   ```bash
-   go run ./cmd/tele-remote/main.go
-   ```
-3. Use the `standalone` profile to skip Config Server synchronization.
+### C. Dynamic UI Menus & Emergency Broadcasts (`src/telegram/ui/menus_test.go`)
+- **Atomic Menu Parsing & Payload Guards**: Verifies malformed, oversized (`> 64 KB`), or deeply nested (`> 8` levels) JSON updates preserve the existing valid component session.
+- **OpenMFE Priority & Duplicate-Order Sorting**: Verifies deterministic component, row, and button ordering.
+- **2-Step Emergency Confirmation & Scoped Prompts**: Verifies `CmdPowerOff` requires confirmation within 60s, reports partial failures accurately, and isolates concurrent users' `PendingInput` states.

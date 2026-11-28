@@ -49,7 +49,7 @@ func SetupRoutes(bot *core.Bot) {
 
 	resetAndShowMainMenu := func(c tb.Context, trigger string) error {
 		convKey := core.GetConvKey(c)
-		bot.Log.Info("User triggered menu command", "cmd", trigger, "chat_id", core.MaskChatID(convKey.ChatID), "user", core.MaskChatID(convKey.UserID))
+		bot.Log.Info("Routes : User triggered menu command (cmd=%s, chat_id=%s, user=%s)", trigger, core.MaskChatID(convKey.ChatID), core.MaskChatID(convKey.UserID))
 
 		// Reset user state to main menu
 		bot.Mu.Lock()
@@ -73,7 +73,7 @@ func SetupRoutes(bot *core.Bot) {
 					cachedFileIDMu.Lock()
 					cachedStartFileID = sentMsg.Photo.FileID
 					cachedFileIDMu.Unlock()
-					bot.Log.Info("Start banner cached on Telegram CDN for fast-path reuse")
+					bot.Log.Info("Routes : Start banner cached on Telegram CDN for fast-path reuse")
 				}
 			}
 		}

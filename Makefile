@@ -1,6 +1,6 @@
 VERSION := $(strip $(shell cat VERSION.txt 2>/dev/null))
 $(if $(VERSION),,$(error VERSION.txt is missing or empty))
-LDFLAGS := -s -w -X 'main.ServerVersion=$(VERSION)'
+LDFLAGS := -s -w -X 'github.com/Bastien-Antigravity/microservice-toolbox/go/pkg/version.BuildVersion=$(VERSION)'
 
 .PHONY: all build test verify-standalone version clean
 

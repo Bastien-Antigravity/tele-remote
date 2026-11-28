@@ -93,11 +93,8 @@ type PendingConfirmation struct {
 // Standard Command Types and Emergency Reply Keyboard Labels
 const (
 	CmdPowerOff int32 = 1
-	CmdStop     int32 = 2
 
 	BtnPowerOff        = "🆘 power off !"
-	BtnCloseAll        = "⏏️ close all positions"
 	BtnConfirmPowerOff = "✅ CONFIRM POWER OFF"
-	BtnConfirmCloseAll = "✅ CONFIRM CLOSE ALL POSITIONS"
 	BtnCancel          = "❌ Cancel"
 )

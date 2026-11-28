@@ -14,12 +14,10 @@ tags:
 
 # 📚 General Misc: tele-remote
 
-Additional references, environment requirements, and miscellaneous specifications for `tele-remote`.
+Reference parameters and ecosystem links for `tele-remote`.
 
-## ⚙️ Environment Variables
-*   `TELE_REMOTE_PORT`: Port to expose the edge websocket interface (Default: `8080`).
-*   `SOVEREIGN_MODE`: Setting to override security checkpoints during emergency updates.
-
-## 🔗 Internal Wiki Links
-*   Startup Checklist: [[Microservice-Startup-Protocol]]
-*   Shared Socket Engine: [[Safe-Socket-Hub]]
+## ⚙️ Configuration Keys (`capabilities.tele_remote`)
+* `ip` / `port`: gRPC stream bind address (Canonical port: `1863`).
+* `token` / `chat_id` / `allowed_users`: `ENC(...)` encrypted Telegram Bot token and authorized operator IDs.
+* `tls_enabled` / `tls_mode` / `auth_token`: Runtime-toggleable gRPC TLS mode (`auto`, `strict`, `disabled`) and shared `x-tele-auth` secret.
+* `burst_limit`: Sliding-window request limit per 2s window (default `60`).

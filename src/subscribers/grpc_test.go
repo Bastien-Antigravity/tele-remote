@@ -44,6 +44,8 @@ type mockLogger struct {
 
 func (m *mockLogger) Debug(f string, a ...any)    {}
 func (m *mockLogger) Info(f string, a ...any)     {}
+func (m *mockLogger) Logon(f string, a ...any)    {}
+func (m *mockLogger) Logout(f string, a ...any)   {}
 func (m *mockLogger) Warning(f string, a ...any)  {}
 func (m *mockLogger) Error(f string, a ...any)    {}
 func (m *mockLogger) Critical(f string, a ...any) {}
@@ -87,7 +89,7 @@ func (m *mockConnectStream) Send(cmd *grpc_control.BotCommand) error {
 // -----------------------------------------------------------------------------
 
 func TestConnect_RejectsTelemetryBeforeRegistration(t *testing.T) {
-	sub := NewGrpcSubscriber(&mockLogger{}, "127.0.0.1", 0).(*GrpcSubscriber)
+	sub := NewGrpcSubscriber(&mockLogger{}, "127.0.0.1", 0)
 	stream := &mockConnectStream{
 		ctx: context.Background(),
 		recvSeq: []*grpc_control.ComponentMessage{
@@ -117,7 +119,7 @@ func TestConnect_RejectsTelemetryBeforeRegistration(t *testing.T) {
 // -----------------------------------------------------------------------------
 
 func TestConnect_AuthTokenEnforcement(t *testing.T) {
-	sub := NewGrpcSubscriber(&mockLogger{}, "127.0.0.1", 0).(*GrpcSubscriber)
+	sub := NewGrpcSubscriber(&mockLogger{}, "127.0.0.1", 0)
 	if err := sub.ConfigureSecurity(toolbox_network.TLSPolicy{}, "secret-token-123"); err != nil {
 		t.Fatalf("unexpected ConfigureSecurity error: %v", err)
 	}
@@ -156,8 +158,8 @@ func TestConnect_AuthTokenEnforcement(t *testing.T) {
 
 	// Valid token + Registration must succeed
 	registered := false
-	sub.cbs = tele_interfaces.ISubscriberCallbacks{
-		OnRegistration: func(clientID, componentName, menuJSON string, pub tele_interfaces.IPublisher) {
+	sub.cbs = tele_interfaces.SubscriberCallbacks{
+		OnRegistration: func(clientID, componentName, menuJSON string, pub tele_interfaces.Publisher) {
 			registered = true
 		},
 	}
@@ -177,9 +179,9 @@ func TestConnect_AuthTokenEnforcement(t *testing.T) {
 // -----------------------------------------------------------------------------
 
 func TestConnect_RejectsComponentIdentityMismatch(t *testing.T) {
-	sub := NewGrpcSubscriber(&mockLogger{}, "127.0.0.1", 0).(*GrpcSubscriber)
-	sub.cbs = tele_interfaces.ISubscriberCallbacks{
-		OnRegistration: func(clientID, componentName, menuJSON string, pub tele_interfaces.IPublisher) {},
+	sub := NewGrpcSubscriber(&mockLogger{}, "127.0.0.1", 0)
+	sub.cbs = tele_interfaces.SubscriberCallbacks{
+		OnRegistration: func(clientID, componentName, menuJSON string, pub tele_interfaces.Publisher) {},
 		OnTelemetry:    func(msg string) {},
 	}
 
@@ -230,7 +232,10 @@ func TestGrpcPublisher_PublishCommandUnblocksOnContextTimeout(t *testing.T) {
 		},
 	}
 
-	pub := publishers.NewGrpcPublisher(stream)
+	aborted := false
+	pub := publishers.NewGrpcPublisher(stream, func() {
+		aborted = true
+	})
 	shortCtx, cancel := context.WithTimeout(context.Background(), 35*time.Millisecond)
 	defer cancel()
 
@@ -243,6 +248,19 @@ func TestGrpcPublisher_PublishCommandUnblocksOnContextTimeout(t *testing.T) {
 	}
 	if elapsed > 250*time.Millisecond {
 		t.Fatalf("PublishCommand blocked too long (%v) on stalled stream Send", elapsed)
+	}
+	if !aborted {
+		t.Fatal("expected onAbort hook to be invoked on stalled stream timeout")
+	}
+
+	// Subsequent calls on an aborted publisher must fail fast immediately without waiting on wedged semaphore
+	startSecond := time.Now()
+	errSecond := pub.PublishCommand(context.Background(), 1, "second-payload", "")
+	if !errors.Is(errSecond, publishers.ErrStreamAborted) {
+		t.Fatalf("expected ErrStreamAborted on subsequent send after stall, got %v", errSecond)
+	}
+	if time.Since(startSecond) > 20*time.Millisecond {
+		t.Fatalf("expected subsequent send on aborted stream to fail fast immediately")
 	}
 }
 
@@ -459,7 +477,7 @@ func runTLSHandshake(t *testing.T, creds credentials.TransportCredentials, remot
 // -----------------------------------------------------------------------------
 
 func TestGrpcSubscriber_ConfigureSecurity_FailFastAndCleartextBoot(t *testing.T) {
-	sub := NewGrpcSubscriber(&mockLogger{}, "127.0.0.1", 0).(*GrpcSubscriber)
+	sub := NewGrpcSubscriber(&mockLogger{}, "127.0.0.1", 0)
 
 	// 1. Enabled: false with empty LocalTLS succeeds cleanly
 	if err := sub.ConfigureSecurity(toolbox_network.TLSPolicy{
@@ -496,7 +514,7 @@ func TestGrpcSubscriber_OptionAMTLSAndRuntimeUpdate(t *testing.T) {
 		CAFile:   pki.CAFile,
 	}
 
-	sub := NewGrpcSubscriber(&mockLogger{}, "127.0.0.1", 0).(*GrpcSubscriber)
+	sub := NewGrpcSubscriber(&mockLogger{}, "127.0.0.1", 0)
 	if err := sub.ConfigureSecurity(toolbox_network.TLSPolicy{
 		Enabled:  true,
 		Mode:     "auto",

@@ -5,13 +5,15 @@ ESSENTIAL PROCESS:
 Implements the gRPC transport listener for Tele-Remote, delegating dynamic
 local/remote TLS/mTLS policy enforcement to microservice-toolbox while enforcing
 bearer token authentication, registration-first stream gating, and bounded shutdown.
+Failure Policy: Fail-Fast on cold-path bind/TLS errors; Drop + PermissionDenied on unauthorized streams.
 
 DATA FLOW:
 1. ConfigureSecurity initializes DynamicTransportCredentials synchronously on the cold path.
-2. StartListen configures WireTap interceptors and DynamicTransportCredentials, binds TCP, and serves TeleRemoteServiceServer.
-3. UpdateRuntimeSecurity hot-reloads authToken and TLS policy via DynamicTransportCredentials.UpdatePolicy.
-4. Connect enforces optional authToken validation, requires a valid Registration frame before telemetry/qmsg frames, and pins component identity.
-5. Shutdown closes stopCh to unblock active streams and runs GracefulStop bounded by gracefulTimeout before forcing Stop.
+2. Bind opens the TCP listener synchronously on the cold path so startup fails fast before readiness is announced.
+3. StartListen configures WireTap interceptors and DynamicTransportCredentials and serves TeleRemoteServiceServer.
+4. UpdateRuntimeSecurity hot-reloads authToken and TLS policy via DynamicTransportCredentials.UpdatePolicy.
+5. Connect enforces optional authToken validation, requires a valid Registration frame before telemetry/qmsg frames, pins component identity, and evicts stalled streams if outbound sends time out.
+6. Shutdown closes stopCh to unblock active streams and runs GracefulStop bounded by gracefulTimeout before forcing Stop.
 
 KEY PARAMETERS:
 - bindIP/bindPort: Configured IP/hostname and TCP port for the gRPC server listener.
@@ -52,14 +54,15 @@ type streamRecvResult struct {
 
 // -----------------------------------------------------------------------------
 
-// GrpcSubscriber acts as the Tele-Remote generic gRPC Listener
+// GrpcSubscriber acts as the Tele-Remote generic gRPC Listener.
 type GrpcSubscriber struct {
 	grpc_control.UnimplementedTeleRemoteServiceServer
 	log             interfaces.Logger
 	bindIP          string
 	bindPort        int
-	cbs             tele_interfaces.ISubscriberCallbacks
+	cbs             tele_interfaces.SubscriberCallbacks
 	grpcSrv         *grpc.Server
+	listener        net.Listener
 	mu              sync.Mutex
 	tlsPolicy       toolbox_network.TLSPolicy
 	dynCreds        *toolbox_network.DynamicTransportCredentials
@@ -72,7 +75,7 @@ type GrpcSubscriber struct {
 // -----------------------------------------------------------------------------
 
 // NewGrpcSubscriber instantiates a gRPC transport listener bound to ip:port.
-func NewGrpcSubscriber(l interfaces.Logger, ip string, port int) tele_interfaces.ISubscriber {
+func NewGrpcSubscriber(l interfaces.Logger, ip string, port int) *GrpcSubscriber {
 	return &GrpcSubscriber{
 		log:             l,
 		bindIP:          ip,
@@ -124,13 +127,38 @@ func (s *GrpcSubscriber) UpdateRuntimeSecurity(policy toolbox_network.TLSPolicy,
 
 // -----------------------------------------------------------------------------
 
-// StartListen binds the TCP socket and serves incoming gRPC component streams.
-func (s *GrpcSubscriber) StartListen(ctx context.Context, cbs tele_interfaces.ISubscriberCallbacks) error {
+// Bind synchronously binds the configured TCP address on the cold path so startup fails fast on port conflicts.
+func (s *GrpcSubscriber) Bind() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.listener != nil {
+		return nil
+	}
+	addr := fmt.Sprintf("%s:%d", s.bindIP, s.bindPort)
+	lis, err := net.Listen("tcp", addr)
+	if err != nil {
+		s.log.Error("GrpcSubscriber : Failed to listen on %s: %v", addr, err)
+		return err
+	}
+	s.listener = lis
+	return nil
+}
+
+// -----------------------------------------------------------------------------
+
+// StartListen binds the TCP socket (if not already bound via Bind) and serves incoming gRPC component streams.
+func (s *GrpcSubscriber) StartListen(ctx context.Context, cbs tele_interfaces.SubscriberCallbacks) error {
+	if err := s.Bind(); err != nil {
+		return err
+	}
+
 	s.mu.Lock()
 	s.cbs = cbs
 	creds := s.dynCreds
 	policy := s.tlsPolicy
 	bindIP := s.bindIP
+	lis := s.listener
 	s.mu.Unlock()
 
 	if creds == nil {
@@ -146,13 +174,6 @@ func (s *GrpcSubscriber) StartListen(ctx context.Context, cbs tele_interfaces.IS
 
 	opts := append([]grpc.ServerOption{grpc.Creds(creds)}, toolbox_wiretap.ServerOptions()...)
 
-	addr := fmt.Sprintf("%s:%d", s.bindIP, s.bindPort)
-	lis, err := net.Listen("tcp", addr)
-	if err != nil {
-		s.log.Error("gRPC Subscriber failed to listen", "err", err, "addr", addr)
-		return err
-	}
-
 	srv := grpc.NewServer(opts...)
 	s.mu.Lock()
 	s.grpcSrv = srv
@@ -162,11 +183,12 @@ func (s *GrpcSubscriber) StartListen(ctx context.Context, cbs tele_interfaces.IS
 
 	go func() {
 		<-ctx.Done()
-		s.log.Info("Shutting down gRPC Subscriber gently")
+		s.log.Info("GrpcSubscriber : Shutting down gRPC Subscriber gently")
 		s.shutdown()
 	}()
 
-	s.log.Info("Starting gRPC Subscriber", "addr", addr)
+	addr := lis.Addr().String()
+	s.log.Info("GrpcSubscriber : Starting gRPC Subscriber on %s", addr)
 	return srv.Serve(lis)
 }
 
@@ -200,7 +222,7 @@ func validateStreamAuth(ctx context.Context, expectedToken string) bool {
 
 // -----------------------------------------------------------------------------
 
-// Connect implements the grpc_control.TeleRemoteServiceServer stream loop
+// Connect implements the grpc_control.TeleRemoteServiceServer stream loop.
 func (s *GrpcSubscriber) Connect(stream grpc_control.TeleRemoteService_ConnectServer) error {
 	s.mu.Lock()
 	authToken := s.authToken
@@ -208,7 +230,7 @@ func (s *GrpcSubscriber) Connect(stream grpc_control.TeleRemoteService_ConnectSe
 	s.mu.Unlock()
 
 	if authToken != "" && !validateStreamAuth(stream.Context(), authToken) {
-		s.log.Warning("Unauthorized gRPC client connection rejected: invalid auth token")
+		s.log.Warning("GrpcSubscriber : Unauthorized gRPC client connection rejected (invalid auth token)")
 		return status.Errorf(codes.PermissionDenied, "⛔ Unauthorized access: invalid gRPC client token")
 	}
 
@@ -216,10 +238,15 @@ func (s *GrpcSubscriber) Connect(stream grpc_control.TeleRemoteService_ConnectSe
 	registered := false
 	var registeredComponent string
 
-	// Wrap stream as publisher immediately
-	dynPub := publishers.NewGrpcPublisher(stream)
+	abortCh := make(chan struct{})
+	var abortOnce sync.Once
+	dynPub := publishers.NewGrpcPublisher(stream, func() {
+		abortOnce.Do(func() {
+			close(abortCh)
+		})
+	})
 
-	recvCh := make(chan streamRecvResult)
+	recvCh := make(chan streamRecvResult, 1)
 	doneCh := make(chan struct{})
 	defer close(doneCh)
 
@@ -237,10 +264,14 @@ func (s *GrpcSubscriber) Connect(stream grpc_control.TeleRemoteService_ConnectSe
 		}
 	}()
 
+	var disconnectOnce sync.Once
 	notifyDisconnect := func() {
-		if clientID != "" && cbs.OnDisconnect != nil {
-			go cbs.OnDisconnect(clientID, dynPub)
-		}
+		disconnectOnce.Do(func() {
+			_ = dynPub.Close()
+			if clientID != "" && cbs.OnDisconnect != nil {
+				cbs.OnDisconnect(clientID, dynPub)
+			}
+		})
 	}
 
 	for {
@@ -251,6 +282,10 @@ func (s *GrpcSubscriber) Connect(stream grpc_control.TeleRemoteService_ConnectSe
 		case <-s.stopCh:
 			notifyDisconnect()
 			return status.Error(codes.Unavailable, "gRPC server shutting down")
+		case <-abortCh:
+			s.log.Warning("GrpcSubscriber : Terminating stalled gRPC client stream (client=%s)", clientID)
+			notifyDisconnect()
+			return status.Error(codes.DeadlineExceeded, "gRPC stream aborted due to stalled send timeout")
 		case <-stream.Context().Done():
 			notifyDisconnect()
 			return stream.Context().Err()
@@ -259,7 +294,7 @@ func (s *GrpcSubscriber) Connect(stream grpc_control.TeleRemoteService_ConnectSe
 		}
 
 		if err != nil {
-			s.log.Warning("stream.Recv error or client disconnected", "client", clientID, "err", err)
+			s.log.Logout("GrpcSubscriber : Stream closed or client disconnected (client=%s, err=%v)", clientID, err)
 			notifyDisconnect()
 			return err
 		}
@@ -272,15 +307,15 @@ func (s *GrpcSubscriber) Connect(stream grpc_control.TeleRemoteService_ConnectSe
 		if !registered {
 			_, isReg := msg.Payload.(*grpc_control.ComponentMessage_Registration)
 			if !isReg || compName == "" || len(compName) > 64 || msg.Port < 0 || msg.Port > 65535 {
-				s.log.Warning("Unauthorized gRPC stream frame before registration", "component", compName)
+				s.log.Warning("GrpcSubscriber : Unauthorized gRPC stream frame before registration (component=%s)", compName)
 				return status.Errorf(codes.PermissionDenied, "⛔ Unauthorized access: component registration required before sending telemetry")
 			}
 			registered = true
 			registeredComponent = compName
 			clientID = fmt.Sprintf("%s:%s:%d", compName, strings.TrimSpace(msg.Host), msg.Port)
-			s.log.Info("New client connected via gRPC", "id", clientID)
+			s.log.Logon("GrpcSubscriber : New client connected via gRPC (id=%s)", clientID)
 		} else if compName != "" && compName != registeredComponent {
-			s.log.Warning("Unauthorized gRPC stream frame: component identity mismatch", "expected", registeredComponent, "got", compName)
+			s.log.Warning("GrpcSubscriber : Unauthorized gRPC stream frame: component identity mismatch (expected=%s, got=%s)", registeredComponent, compName)
 			notifyDisconnect()
 			return status.Errorf(codes.PermissionDenied, "⛔ Unauthorized access: component identity mismatch on active stream")
 		}
@@ -317,9 +352,13 @@ func (s *GrpcSubscriber) shutdown() {
 		}
 		s.mu.Lock()
 		srv := s.grpcSrv
+		lis := s.listener
 		timeout := s.gracefulTimeout
 		s.mu.Unlock()
 		if srv == nil {
+			if lis != nil {
+				_ = lis.Close()
+			}
 			return
 		}
 		if timeout <= 0 {
@@ -333,7 +372,7 @@ func (s *GrpcSubscriber) shutdown() {
 		select {
 		case <-done:
 		case <-time.After(timeout):
-			s.log.Warning("gRPC GracefulStop timed out; forcing immediate Stop", "timeout", timeout)
+			s.log.Warning("GrpcSubscriber : gRPC GracefulStop timed out after %v; forcing immediate Stop", timeout)
 			srv.Stop()
 		}
 	})
